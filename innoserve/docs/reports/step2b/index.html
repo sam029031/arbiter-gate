@@ -1,0 +1,49 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>ARBITER Gate</title>
+<style>
+:root{--bg:#f7f7f5;--card:#fff;--ink:#1d1d1f;--mute:#5f6368;--line:#dcdcd7;
+--red:#b3261e;--redbg:#fdecea;--amber:#8a5a00;--amberbg:#fff4dc;--blue:#1f4e8c;--bluebg:#e8f0fb;
+--green:#1e6b3a;--greenbg:#e7f4ec;--code:#f1f1ee}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--card:#1d1d20;--ink:#ececec;--mute:#a0a0a8;
+--line:#34343a;--red:#ff8a80;--redbg:#3a1d1b;--amber:#ffcc66;--amberbg:#3a2f14;--blue:#9cc2ff;
+--bluebg:#1b2a40;--green:#8fd9a8;--greenbg:#16301f;--code:#26262a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
+font:15px/1.55 system-ui,-apple-system,"Noto Sans TC","PingFang TC",sans-serif}
+main{max-width:980px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 10px}
+.sub{color:var(--mute);margin:0 0 20px}.card{background:var(--card);border:1px solid var(--line);
+border-radius:10px;padding:16px 18px;margin:12px 0}
+table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:7px 9px;
+border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--mute);font-weight:600}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tbl{overflow-x:auto}.btn{display:inline-block;border:1px solid var(--line);background:var(--card);
+color:var(--ink);border-radius:7px;padding:6px 12px;font:inherit;cursor:pointer;text-decoration:none}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.verdict{border-radius:10px;padding:14px 18px;margin:14px 0;font-size:19px;font-weight:700}
+.v-proven{background:var(--redbg);color:var(--red)}.v-unrun{background:var(--amberbg);color:var(--amber)}
+.v-none{background:var(--bluebg);color:var(--blue)}.v-hint{background:var(--amberbg);color:var(--amber)}
+.verdict small{display:block;font-size:13px;font-weight:400;margin-top:4px;color:var(--ink)}
+.tag{display:inline-block;font-size:12px;border-radius:5px;padding:1px 7px;margin-left:6px;
+background:var(--code);color:var(--mute);font-weight:600}.tag.ok{background:var(--greenbg);color:var(--green)}
+.tag.warn{background:var(--amberbg);color:var(--amber)}.tag.dev{background:var(--amberbg);color:var(--amber)}
+pre{background:var(--code);border-radius:8px;padding:12px;overflow-x:auto;font-size:13px;line-height:1.45;margin:8px 0}
+.add{color:var(--green)}.del{color:var(--red)}.hunk{color:var(--blue)}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:0}dt{color:var(--mute)}dd{margin:0;word-break:break-word}
+.note{color:var(--mute);font-size:13px}form.inline{display:inline}
+.runs td:last-child{white-space:nowrap}
+</style></head><body><main>
+<h1>ARBITER Gate</h1>
+<p class="sub">部署前證據閘門：只有實際在 EVM 上執行成功的攻擊，才判定為已證實可攻擊。</p>
+
+<h2>預錄結果</h2>
+<div class="card"><p class="note">重播已完成的稽核：重新執行存下的攻擊、量 A/B/G、重新驗證修補。
+不發任何 LLM 請求。</p><div class='tbl'><table class='runs'><tr><th>run</th><th>來源</th><th>時間</th><th></th></tr><tr><td><code>gate-StakingVault-20261028-182059-747e83</code></td><td>gate --file</td><td>10/28 18:22</td><td><form class='inline' method='post' action='/replay'><input type='hidden' name='run_id' value='gate-StakingVault-20261028-182059-747e83'><button class='btn primary'>看結果</button></form></td></tr><tr><td><code>spark-test-5</code></td><td>audit</td><td>10/28 17:45</td><td><form class='inline' method='post' action='/replay'><input type='hidden' name='run_id' value='spark-test-5'><button class='btn primary'>看結果</button></form></td></tr><tr><td><code>spark-test-4</code><span class='tag ok'>含修補紀錄</span></td><td>audit</td><td>10/28 17:43</td><td><form class='inline' method='post' action='/replay'><input type='hidden' name='run_id' value='spark-test-4'><button class='btn primary'>看結果</button></form></td></tr><tr><td><code>spark-test-3</code><span class='tag ok'>含修補紀錄</span></td><td>audit</td><td>10/28 17:41</td><td><form class='inline' method='post' action='/replay'><input type='hidden' name='run_id' value='spark-test-3'><button class='btn primary'>看結果</button></form></td></tr><tr><td><code>spark-test-2</code><span class='tag ok'>含修補紀錄</span></td><td>audit</td><td>10/28 17:39</td><td><form class='inline' method='post' action='/replay'><input type='hidden' name='run_id' value='spark-test-2'><button class='btn primary'>看結果</button></form></td></tr><tr><td><code>spark-test-1</code></td><td>audit</td><td>10/28 17:37</td><td><form class='inline' method='post' action='/replay'><input type='hidden' name='run_id' value='spark-test-1'><button class='btn primary'>看結果</button></form></td></tr><tr><td><code>audit</code></td><td>audit</td><td>10/28 17:19</td><td><form class='inline' method='post' action='/replay'><input type='hidden' name='run_id' value='audit'><button class='btn primary'>看結果</button></form></td></tr></table></div></div>
+<h2>上傳合約即時稽核</h2>
+<div class="card"><form method="post" action="/upload" enctype="multipart/form-data">
+<input type="file" name="contract" accept=".sol" required>
+<button class="btn primary">開始稽核</button></form>
+<p class="note">單一 .sol 檔、沒有 import。一次稽核約 1–2 分鐘，按下後請等待頁面跳轉。
+會呼叫 LLM（模型見結果頁）。</p></div>
+<div class='card'><b>尚未完成的部分</b><ul><li><b>沙箱隔離</b> <span class='tag dev'>開發中</span> <span class='note'>上傳的合約目前直接在這台機器上用 forge 編譯與執行；所以本頁只綁 127.0.0.1，不對外開放</span></li><li><b>即時進度時間軸</b> <span class='tag dev'>開發中</span> <span class='note'>目前上傳後要等整個稽核跑完才出現結果頁</span></li><li><b>本地鏈重播</b> <span class='tag dev'>開發中</span> <span class='note'>交易與餘額的兩欄重播頁</span></li><li><b>SARIF／GitHub Action</b> <span class='tag dev'>開發中</span> <span class='note'>PR 部署閘門</span></li><li><b>回歸測試下載</b> <span class='tag dev'>開發中</span> <span class='note'>TestArbiterRegression 的 Foundry 專案</span></li></ul></div>
+<p class="note">「已證實可攻擊」附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。</p>
+</main></body></html>

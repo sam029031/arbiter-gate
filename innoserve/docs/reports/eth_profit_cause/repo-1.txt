@@ -1,0 +1,10 @@
+auditing 1 contract(s)
+ARBITER  model=arbiter-gpt:latest  samples=1  repeats=1  max_turns=16  workers=6  rpm=45
+  [MISS] r0 examples::StakingVault                         -> safe  (turn_budget_exhausted, 1x16t, 309.36s)
+
+  未發現可證明攻擊（不等於安全）  examples::StakingVault  [no_provable_attack: turn_budget_exhausted]
+
+0/1 reported vulnerable, each backed by an executed exploit
+1/1 未發現可證明攻擊（不等於安全）
+full transcripts: runs/predexp-repo-1.results.jsonl
+usage: {"requests": 16, "prompt_tokens": 250348, "completion_tokens": 11097, "cost_usd": 0.0, "retries": 0, "http_errors": 0, "parse_failures": 0, "reasoning_recoveries": 13, "system_fingerprints": ["fp_ollama"], "models_seen": ["arbiter-gpt:latest"]}

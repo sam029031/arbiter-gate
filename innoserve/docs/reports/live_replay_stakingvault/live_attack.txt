@@ -1,0 +1,15 @@
+  chain 31337 at http://127.0.0.1:8545
+  victim   0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+  attacker 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
+
+  queue deployed at 0x5FbDB2315678afecb367f032d93F642f64180aa3
+  queue holds 6.00 ether (5 of it the victim's)
+  attack tx 0x80e4ac484aad9a10ce54f28f3689a237df41bfe2b0014866965e6666340d8429  gas 127,454
+  victim's claim: FAILED  (000000000000000\": Error(\"claim failed\")"}],"warnings":[]})
+
+  queue drained          6.0000 ether
+  attacker net           5.9999 ether (put in 1, gas 231,081)
+  victim shortfall       5.0000 ether
+
+  PROVEN on a live chain: value left the contract, the attacker holds it,
+  and an ordinary user who queued first cannot get theirs back.

@@ -1,0 +1,7 @@
+predexp-herm-1 rc=1 wall=57s
+predexp-herm-2 rc=1 wall=56s
+predexp-herm-3 rc=0 wall=145s
+predexp-repo-1 rc=0 wall=310s
+predexp-repo-2 rc=0 wall=155s
+predexp-repo-3 rc=0 wall=465s
+DONE

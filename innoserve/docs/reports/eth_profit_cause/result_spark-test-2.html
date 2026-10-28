@@ -1,0 +1,85 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>ARBITER Gate 結果</title>
+<style>
+:root{--bg:#f7f7f5;--card:#fff;--ink:#1d1d1f;--mute:#5f6368;--line:#dcdcd7;
+--red:#b3261e;--redbg:#fdecea;--amber:#8a5a00;--amberbg:#fff4dc;--blue:#1f4e8c;--bluebg:#e8f0fb;
+--green:#1e6b3a;--greenbg:#e7f4ec;--code:#f1f1ee}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--card:#1d1d20;--ink:#ececec;--mute:#a0a0a8;
+--line:#34343a;--red:#ff8a80;--redbg:#3a1d1b;--amber:#ffcc66;--amberbg:#3a2f14;--blue:#9cc2ff;
+--bluebg:#1b2a40;--green:#8fd9a8;--greenbg:#16301f;--code:#26262a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
+font:15px/1.55 system-ui,-apple-system,"Noto Sans TC","PingFang TC",sans-serif}
+main{max-width:980px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 10px}
+.sub{color:var(--mute);margin:0 0 20px}.card{background:var(--card);border:1px solid var(--line);
+border-radius:10px;padding:16px 18px;margin:12px 0}
+table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:7px 9px;
+border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--mute);font-weight:600}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tbl{overflow-x:auto}.btn{display:inline-block;border:1px solid var(--line);background:var(--card);
+color:var(--ink);border-radius:7px;padding:6px 12px;font:inherit;cursor:pointer;text-decoration:none}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.verdict{border-radius:10px;padding:14px 18px;margin:14px 0;font-size:19px;font-weight:700}
+.v-proven{background:var(--redbg);color:var(--red)}.v-unrun{background:var(--amberbg);color:var(--amber)}
+.v-none{background:var(--bluebg);color:var(--blue)}.v-hint{background:var(--amberbg);color:var(--amber)}
+.verdict small{display:block;font-size:13px;font-weight:400;margin-top:4px;color:var(--ink)}
+.tag{display:inline-block;font-size:12px;border-radius:5px;padding:1px 7px;margin-left:6px;
+background:var(--code);color:var(--mute);font-weight:600}.tag.ok{background:var(--greenbg);color:var(--green)}
+.tag.warn{background:var(--amberbg);color:var(--amber)}.tag.dev{background:var(--amberbg);color:var(--amber)}
+pre{background:var(--code);border-radius:8px;padding:12px;overflow-x:auto;font-size:13px;line-height:1.45;margin:8px 0}
+.add{color:var(--green)}.del{color:var(--red)}.hunk{color:var(--blue)}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:0}dt{color:var(--mute)}dd{margin:0;word-break:break-word}
+.note{color:var(--mute);font-size:13px}form.inline{display:inline}
+.runs td:last-child{white-space:nowrap}
+details{margin-top:12px}summary{cursor:pointer;color:var(--mute)}
+</style></head><body><main>
+<p><a class="btn" href="/">← 回首頁</a></p>
+<h1>稽核結果</h1>
+<div class="card"><dl>
+<dt>輸入</dt><dd>預錄結果 spark-test-2（含修補紀錄）</dd>
+<dt>run</dt><dd><code>spark-test-2</code></dd>
+<dt>模型</dt><dd><code>arbiter-gpt:latest</code></dd>
+<dt>本次 LLM 請求數</dt><dd><b>0</b></dd>
+<dt>gate 結束碼</dt><dd><code>1</code>（1＝擋部署，2＝稽核未完成，0＝通過）</dd>
+<dt>耗時</dt><dd>1.29 秒</dd>
+</dl></div>
+<div class='verdict v-proven'>已證實可攻擊（擋部署）</div><p class='note'>examples::StakingVault　回合 4</p><div class='card'><b>Re‑entrancy in unstake() allows attacker to steal ether from other stakers</b><dl><dt>函式</dt><dd><code>unstake</code></dd><dt>嚴重度</dt><dd>High</dd><dt>謂詞</dt><dd><code>victim_loss</code><span class='tag ok'>strict</span></dd><dt>攻擊證明</dt><dd><code>StakingVaultReentrancyExploitPoc</code>（已在 EVM 上執行，謂詞成立）</dd></dl><h2>A/B/G：同一個受害者，有沒有被攻擊 <span class='tag'>已重現（合成層）</span></h2><div class='tbl'><table><tr><th>環境</th><th>受害者帳戶初始餘額</th><th>經過時間</th><th>攻擊輪數</th><th>無攻擊取回</th><th>有攻擊取回</th><th>攻擊者獲利</th></tr><tr><td>預設</td><td class='num'>10 ETH</td><td>—</td><td class='num'>1</td><td class='num'>2 ETH</td><td class='num'>2 ETH</td><td class='num'>1 ETH</td></tr><tr><td>受害者餘額 1000 倍</td><td class='num'>10,000 ETH</td><td>—</td><td class='num'>1</td><td class='num'>2 ETH</td><td class='num'>2 ETH</td><td class='num'>1 ETH</td></tr><tr><td>一週後</td><td class='num'>10 ETH</td><td>7 天</td><td class='num'>1</td><td class='num'>2 ETH</td><td class='num'>2 ETH</td><td class='num'>1 ETH</td></tr><tr><td>8 輪攻擊 <span class='tag warn'>受害者受損</span></td><td class='num'>10 ETH</td><td>—</td><td class='num'>8</td><td class='num'>2 ETH</td><td class='num'>0 ETH</td><td class='num'>7 ETH</td></tr></table></div><p class='note'>攻擊者獲利可能來自合約中其他人的資金（例如部署時存入的 5 ether）；受害者是否受損看「無攻擊取回」和「有攻擊取回」的差。</p><p class='note'>合成層數字：每個環境各跑一次無攻擊、一次有攻擊，都從乾淨狀態開始；「受害者帳戶初始餘額」是測試在受害者進場前給它帳戶的 ETH，實際存入多少由攻擊證明裡的受害者步驟決定。</p><h2>修補 <span class='tag ok'>修補已通過驗證（針對此攻擊）</span></h2><dl><dt>來源</dt><dd>修補紀錄（已用 forge 重新驗證），模型 <code>arbiter-gpt:latest</code></dd><dt>修改行數</dt><dd>6</dd><dt>修補閘門</dt><dd><code>0:pass L:pass 3:pass 1:pass 2:pass</code></dd><dt>模型說明</dt><dd>Moved state updates before the external call to follow checks-effects-interactions, preventing re‑entrancy attacks.</dd></dl><p><button class='btn' onclick="tg(0,'ws')">忽略空白的 diff</button> <button class='btn' onclick="tg(0,'raw')">原始 diff</button> <span class='note' id='lbl0'>目前：忽略空白（僅供閱讀）</span></p><pre id='ws0'>--- a/src/Target.sol (whitespace ignored, display only)
++++ b/src/Target.sol (whitespace ignored, display only)
+<span class='hunk'>@@ -21,11 +21,10 @@</span>
+         uint256 amount = stakeOf[msg.sender];
+         require(amount &gt; 0, &quot;no position&quot;);
+ 
+<span class='del'>-        // Deliberate reentrancy bug: state is cleared after the external call.</span>
+<span class='add'>+        // Fixed reentrancy: update state before external call.</span>
+<span class='add'>+        totalStaked -= amount;</span>
+<span class='add'>+        stakeOf[msg.sender] = 0;</span>
+         (bool ok, ) = msg.sender.call{value: amount}(&quot;&quot;);
+         require(ok, &quot;eth transfer failed&quot;);
+<span class='del'>-</span>
+<span class='del'>-        totalStaked -= amount;</span>
+<span class='del'>-        stakeOf[msg.sender] = 0;</span>
+     }
+ }</pre><pre id='raw0' hidden>--- a/src/Target.sol
++++ b/src/Target.sol
+<span class='hunk'>@@ -21,11 +21,10 @@</span>
+         uint256 amount = stakeOf[msg.sender];
+         require(amount &gt; 0, &quot;no position&quot;);
+ 
+<span class='del'>-        // Deliberate reentrancy bug: state is cleared after the external call.</span>
+<span class='add'>+        // Fixed reentrancy: update state before external call.</span>
+<span class='add'>+        totalStaked -= amount;</span>
+<span class='add'>+        stakeOf[msg.sender] = 0;</span>
+         (bool ok, ) = msg.sender.call{value: amount}(&quot;&quot;);
+         require(ok, &quot;eth transfer failed&quot;);
+<span class='del'>-</span>
+<span class='del'>-        totalStaked -= amount;</span>
+<span class='del'>-        stakeOf[msg.sender] = 0;</span>
+     }
+ }</pre><h2>修補後</h2><div class='tbl'><table><tr><th>環境</th><th>受害者帳戶初始餘額</th><th>經過時間</th><th>攻擊輪數</th><th>無攻擊取回</th><th>有攻擊取回</th><th>攻擊者獲利</th></tr><tr><td>預設</td><td class='num'>10 ETH</td><td>—</td><td class='num'>1</td><td class='num'>2 ETH</td><td class='num'>2 ETH</td><td class='num'>0 ETH</td></tr><tr><td>受害者餘額 1000 倍</td><td class='num'>10,000 ETH</td><td>—</td><td class='num'>1</td><td class='num'>2 ETH</td><td class='num'>2 ETH</td><td class='num'>0 ETH</td></tr><tr><td>一週後</td><td class='num'>10 ETH</td><td>7 天</td><td class='num'>1</td><td class='num'>2 ETH</td><td class='num'>2 ETH</td><td class='num'>0 ETH</td></tr><tr><td>8 輪攻擊</td><td class='num'>10 ETH</td><td>—</td><td class='num'>8</td><td class='num'>2 ETH</td><td class='num'>2 ETH</td><td class='num'>0 ETH</td></tr></table></div><p class='note'>修補已通過驗證（針對此攻擊）只代表：這個攻擊在 4 個環境都失效、無攻擊時的取回沒有變少、對外介面沒有改變。修補是建議，要由開發者審閱後套用並重新稽核。</p></div>
+<div class='card'><b>尚未完成的部分</b><ul><li><b>沙箱隔離</b> <span class='tag dev'>開發中</span> <span class='note'>上傳的合約目前直接在這台機器上用 forge 編譯與執行；所以本頁只綁 127.0.0.1，不對外開放</span></li><li><b>即時進度時間軸</b> <span class='tag dev'>開發中</span> <span class='note'>目前上傳後要等整個稽核跑完才出現結果頁</span></li><li><b>本地鏈重播</b> <span class='tag dev'>開發中</span> <span class='note'>交易與餘額的兩欄重播頁</span></li><li><b>SARIF／GitHub Action</b> <span class='tag dev'>開發中</span> <span class='note'>PR 部署閘門</span></li><li><b>回歸測試下載</b> <span class='tag dev'>開發中</span> <span class='note'>TestArbiterRegression 的 Foundry 專案</span></li></ul></div>
+<p class="note">「已證實可攻擊」附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。</p>
+<script>
+function tg(i,which){var ws=document.getElementById('ws'+i),raw=document.getElementById('raw'+i);
+ws.hidden=which!=='ws';raw.hidden=which!=='raw';
+document.getElementById('lbl'+i).textContent=which==='ws'?'目前：忽略空白（僅供閱讀）':'目前：原始 diff（可套用）';}
+</script></main></body></html>

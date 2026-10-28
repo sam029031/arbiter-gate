@@ -1,0 +1,3 @@
+PASS: gateway at http://localhost:11434/v1 replied AIS3_OK
+model: arbiter-gpt:latest
+usage: {"completion_tokens": 71, "cost_usd": 0.0, "http_errors": 0, "prompt_tokens": 77, "requests": 1, "retries": 0}

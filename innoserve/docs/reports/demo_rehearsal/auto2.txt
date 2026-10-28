@@ -1,0 +1,113 @@
+
+[1m==========================================================================
+  第 0 段  前置檢查
+==========================================================================[0m
+[2m  通道、工具、網頁；先把預錄結果頁產生好[0m
+
+  .env       loaded (model: arbiter-gpt:latest, endpoint: http://localhost:11434/v1)
+  api_smoke  PASS: gateway at http://localhost:11434/v1 replied AIS3_OK
+  forge      /home/sam/.foundry/bin/forge
+  anvil      /home/sam/.foundry/bin/anvil
+  cast       /home/sam/.foundry/bin/cast
+  web        already running at http://127.0.0.1:8765/ (reused)
+  recorded   spark-test-2 re-adjudicated by the page in 1.3 s (forge, 0 LLM requests)
+             http://127.0.0.1:8765/result/b6ef0181b1f5
+
+[2m  (this segment: 3.5 s)[0m
+[2m  ......[0m
+
+[1m==========================================================================
+  第 2 段  預錄結果（spark-test-2）
+==========================================================================[0m
+[2m  判定、A/B/G、修補 diff[0m
+
+  在瀏覽器打開：http://127.0.0.1:8765/result/b6ef0181b1f5
+
+  頁面上的內容（同一份 gate.json；瀏覽器打不開時就念這裡）：
+    模型      arbiter-gpt:latest；本次 LLM 請求 0
+    判定      已證實可攻擊（擋部署）
+    謂詞      victim_loss（strict=True）
+    A/B/G     2/2/1、2/2/1、2/2/1、2/0/7  (ETH，4 個環境)
+    修補      修補已通過驗證（針對此攻擊），6 行，檢查 0:pass L:pass 3:pass 1:pass 2:pass
+    修補後    2/2/0、2/2/0、2/2/0、2/2/0
+[1m  >> A 是沒有攻擊時受害者拿回多少，B 是有攻擊時拿回多少，G 是攻擊者賺多少。[0m
+[1m  >> 前三個環境模型的攻擊沒有讓受害者受損，第 4 個環境（8 輪）才 2/0/7，我們照實顯示。[0m
+[1m  >> 修補是 arbiter-gpt 產生的，經過 0→L→3→1→2 五道檢查，標示只說「針對此攻擊」通過。[0m
+
+[2m  (this segment: 0.0 s)[0m
+[2m  ......[0m
+
+[1m==========================================================================
+  第 3 段  真鏈：同一個合約，真的交易
+==========================================================================[0m
+[2m  anvil 兩條鏈：一條有 attack()，一條沒有[0m
+
+[1m  >> 鏈上的攻擊是 victim_probe.py 的 DRAIN：7/28 為了校正判定寫的已知參考攻擊，不是模型寫的。[0m
+
+  [1m-- 原合約 examples/StakingVault.sol[0m
+  control chain (chain 31337, http://127.0.0.1:8600)
+    ok  deploy StakingVault (5 ETH)    tx=0xc2abd9446c00f8e5af5d5127a85b15e6c3412b31f525ade3355be3fd39c0c313  gas=0
+    ok  stake()                        tx=0xfe07e5bdbae29c340c1ed3893a8049e057ac36651a390b84b11c26c6f1364a1c  gas=48,810
+    ok  deploy Attacker (1 ETH)        tx=0x558135e78c50e81437b3f8bed1e933052bb828b23795708184f73636e13edead  gas=0
+    ok  unstake()                      tx=0x22337113b2593ae139790bc71497c7c64ff0cb52ba5bc2caf580a944ac418e47  gas=33,918
+    vault 7 ETH -> 7 ETH after attack step -> 5 ETH after victim exit
+  attack chain  (chain 31337, http://127.0.0.1:8601)
+    ok  deploy StakingVault (5 ETH)    tx=0xc2abd9446c00f8e5af5d5127a85b15e6c3412b31f525ade3355be3fd39c0c313  gas=0
+    ok  stake()                        tx=0xfe07e5bdbae29c340c1ed3893a8049e057ac36651a390b84b11c26c6f1364a1c  gas=48,810
+    ok  deploy Attacker (1 ETH)        tx=0x558135e78c50e81437b3f8bed1e933052bb828b23795708184f73636e13edead  gas=0
+    ok  attack()                       tx=0x57d1c672b4c590ea399ab2a8c73ffb845067906fec6682663b61336982a7cd2d  gas=132,142
+    REV unstake()                      tx=-  gas=0  (000000000000000000\": Error(\"eth transfer failed\")"}],"warnings":[]})
+    vault 7 ETH -> 0 ETH after attack step -> 0 ETH after victim exit
+
+  target: original
+  A  victim recovered, control chain          2 ETH
+  B  victim recovered, attack chain           0 ETH   (paid in 2 ETH)
+  G  attacker contract gain                   7 ETH   (net incl. gas 6.999911 ETH)
+     vault drained by the attack step         7 ETH
+
+  PROVEN on a live chain: value left the vault, the attacker holds it,
+  and the victim who staked 2 ETH did not get it back.
+
+  [1m-- 同一個攻擊，打 arbiter-gpt 的修補（spark-test-2）[0m
+  control chain (chain 31337, http://127.0.0.1:8610)
+    ok  deploy StakingVault (5 ETH)    tx=0xeef6401f55436ca53ae14e3c0b0dbd0e0cf4f0cdcac55644b9437afcc200417d  gas=0
+    ok  stake()                        tx=0xfe07e5bdbae29c340c1ed3893a8049e057ac36651a390b84b11c26c6f1364a1c  gas=48,810
+    ok  deploy Attacker (1 ETH)        tx=0xfadf31a26559b19b571a7d6f3d73ff380359db3a5bffaa753beceec8c4436134  gas=0
+    ok  unstake()                      tx=0x58b56b8b8f2078cc03ad570e13f10d4b1b5aca62556e5cba8fcfe1548b5037c3  gas=33,918
+    vault 7 ETH -> 7 ETH after attack step -> 5 ETH after victim exit
+  attack chain  (chain 31337, http://127.0.0.1:8611)
+    ok  deploy StakingVault (5 ETH)    tx=0xeef6401f55436ca53ae14e3c0b0dbd0e0cf4f0cdcac55644b9437afcc200417d  gas=0
+    ok  stake()                        tx=0xfe07e5bdbae29c340c1ed3893a8049e057ac36651a390b84b11c26c6f1364a1c  gas=48,810
+    ok  deploy Attacker (1 ETH)        tx=0xfadf31a26559b19b571a7d6f3d73ff380359db3a5bffaa753beceec8c4436134  gas=0
+    REV attack()                       tx=-  gas=0  (000000000000000000\": Error(\"eth transfer failed\")"}],"warnings":[]})
+    ok  unstake()                      tx=0x58b56b8b8f2078cc03ad570e13f10d4b1b5aca62556e5cba8fcfe1548b5037c3  gas=33,918
+    vault 7 ETH -> 7 ETH after attack step -> 5 ETH after victim exit
+
+  target: patched (/home/sam/innoserve/arbiter-audit/arbiter/runs/spark-test-2.patches.jsonl, arbiter-gpt:latest, 6 lines)
+  A  victim recovered, control chain          2 ETH
+  B  victim recovered, attack chain           2 ETH   (paid in 2 ETH)
+  G  attacker contract gain                   0 ETH   (net incl. gas 0 ETH)
+     vault drained by the attack step         0 ETH
+
+  NOT PROVEN. The transcript above is what actually happened.
+
+[1m  >> 攻擊合約、帳戶、金額、交易都一樣，只差修補的那幾行。修補是 AI 產生的，攻擊是已知的參考攻擊。[0m
+
+[2m  (this segment: 13.6 s)[0m
+[2m  ......[0m
+
+[1m==========================================================================
+  第 4 段  收尾
+==========================================================================[0m
+
+[1m  >> 「已證實可攻擊」附可重跑的證據；其他判定都不代表合約沒有漏洞。[0m
+
+[2m  (this segment: 0.0 s)[0m
+
+  [1m耗時（不含暫停）[0m
+        3.5 s  第 0 段  前置檢查
+        0.0 s  第 2 段  預錄結果（spark-test-2）
+       13.6 s  第 3 段  真鏈：同一個合約，真的交易
+        0.0 s  第 4 段  收尾
+       17.1 s  合計（各段相加）
+       35.3 s  含暫停的總時間

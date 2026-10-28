@@ -1,0 +1,12 @@
+auditing 1 contract(s)
+ARBITER  model=arbiter-gpt:latest  samples=1  repeats=1  max_turns=16  workers=6  rpm=45
+  [MISS] r0 examples::StakingVault                         -> vuln  (proven, 1x7t, 154.63s)
+
+  VULNERABLE  examples::StakingVault: Re‑entrancy in unstake() allows attacker to drain vault and cause loss to other stakers
+              function: unstake
+              severity: high
+              proof:    reentrancy_victim_loss2ExploitPoc (executed, predicate satisfied)
+
+1/1 reported vulnerable, each backed by an executed exploit
+full transcripts: runs/predexp-repo-2.results.jsonl
+usage: {"requests": 7, "prompt_tokens": 73553, "completion_tokens": 5741, "cost_usd": 0.0, "retries": 0, "http_errors": 0, "parse_failures": 0, "reasoning_recoveries": 6, "system_fingerprints": ["fp_ollama"], "models_seen": ["arbiter-gpt:latest"]}

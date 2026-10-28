@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Credential guard. Enable with:  git config core.hooksPath .githooks
+#
+# The repository already leaked a gateway key identifier once, through a probe
+# artefact whose filename matched nothing in .gitignore. Filename rules cannot
+# see inside a value, so this inspects staged *content*.
+#
+# The rules used to live in a sibling project. When that project was removed the
+# hook kept running and printed "credential scan SKIPPED" -- it had been written
+# to fail open, so deleting an unrelated directory silently disarmed the only
+# thing standing between a gateway key and a public repository. The scanner is
+# inlined here now, and it fails closed: if it cannot run, the commit stops.
+#
+# Two severities, because shape-based secret detection has a high false-positive
+# rate on smart-contract source (init-code hashes and TYPEHASHes are 64 hex):
+#
+#   blocking  -- a credential keyword adjacent to a high-entropy value. Refuses
+#                the commit. Override with `git commit --no-verify` only if you
+#                have looked at it.
+#   advisory  -- high entropy with no credential context. Prints and continues.
+#
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+python_bin="${PYTHON:-python}"
+command -v "$python_bin" >/dev/null 2>&1 || python_bin=python3
+if ! command -v "$python_bin" >/dev/null 2>&1; then
+    echo "pre-commit: no python, so staged content cannot be scanned. Refusing." >&2
+    exit 1
+fi
+
+staged="$(git diff --cached --name-only --diff-filter=ACM)"
+[ -z "$staged" ] && exit 0
+
+# .env is not tracked, but a rename or a -f can still stage one.
+blocked_paths="$(printf '%s\n' "$staged" | grep -E '(^|/)\.env$|\.cookies$|kaggle\.json$' || true)"
+if [ -n "$blocked_paths" ]; then
+    echo "pre-commit: refusing to commit credential files:" >&2
+    printf '  %s\n' $blocked_paths >&2
+    exit 1
+fi
+
+"$python_bin" - "$repo_root" <<'PY'
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+# Keywords that make an adjacent high-entropy value a credential rather than
+# data. `token` is deliberately absent -- it is a Solidity noun, and requiring
+# `api_token`/`auth_token` keeps the ERC-20 vocabulary out of scope.
+_CRED_KEY = (r"(?:api[_-]?key|apikey|api[_-]?token|auth[_-]?token|access[_-]?token|"
+             r"secret[_-]?key|client[_-]?secret|private[_-]?key|password|passwd|"
+             r"authorization|bearer[_-]?token)")
+
+# Each blocking rule requires a credential keyword next to the value. A shape-only
+# sweep was tried and is actively harmful on this corpus: it flagged the UniswapV2
+# init-code hash quoted inside a detector, and the published splits_sha256. In an
+# EVM repository, 64-hex constants are domain vocabulary.
+_BLOCKING = (
+    # `api_key: <value>` / `"api_key"="<value>"` -- the gateway 429 shape.
+    ("api_key", re.compile(
+        rf"(?i)(\b{_CRED_KEY}\b['\"]?\s*[:=]\s*['\"]?)([A-Za-z0-9_\-]{{16,}})")),
+    # `api_key <value>` with only whitespace between, as in prose error text.
+    ("api_key", re.compile(rf"(?i)(\b{_CRED_KEY}\b\s+)([A-Za-z0-9]{{32,}})\b")),
+    # Provider-prefixed tokens: the prefix *is* the context, no keyword needed.
+    ("token", re.compile(
+        r"\b(?:sk|pk|rk|ghp|gho|ghs|ghu|xox[baprs])[-_][A-Za-z0-9_\-]{16,}\b")),
+    ("bearer", re.compile(r"(?i)\bBearer\s+[A-Za-z0-9_\-.=]{20,}")),
+)
+_ADVISORY = (("hex64", re.compile(r"\b[0-9a-f]{64}\b")),)
+
+
+def scan(text):
+    """Credential-shaped substrings as (label, sample, blocking)."""
+    hits = []
+    for name, pat in _BLOCKING:
+        for m in pat.finditer(text):
+            value = (m.group(2) if name == "api_key" and (m.lastindex or 0) >= 2
+                     else m.group(0))
+            hits.append((name, value[:24] + ("..." if len(value) > 24 else ""), True))
+    for name, pat in _ADVISORY:
+        for m in pat.finditer(text):
+            hits.append((name, m.group(0)[:24] + "...", False))
+    return hits
+
+
+root = Path(sys.argv[1])
+files = subprocess.run(["git", "diff", "--cached", "--name-only",
+                        "--diff-filter=ACM"],
+                       capture_output=True, text=True, cwd=root).stdout.split()
+
+# A file testing the scanner necessarily contains credential-shaped strings, so it
+# would block every commit that touches it and teach everyone to reach for
+# --no-verify -- which disables the guard for the whole commit, including the file
+# that actually leaked. An explicit in-file pragma is narrower and leaves a trace
+# in the diff, so granting it is reviewable. It does NOT excuse a real secret:
+# scan() still runs and its hits are demoted to advisory, not silenced.
+PRAGMA = "pre-commit: allow-credential-fixtures"
+
+blocking, advisory = [], []
+for rel in files:
+    if "/figures/" in rel or rel.endswith((".png", ".svg", ".pdf", ".zip")):
+        continue
+    blob = subprocess.run(["git", "show", f":{rel}"], capture_output=True, cwd=root)
+    if blob.returncode:
+        continue
+    text = blob.stdout.decode("utf-8", errors="replace")
+    exempt = PRAGMA in text
+    for name, sample, is_blocking in scan(text):
+        if exempt:
+            advisory.append((rel, f"{name} (fixture-exempt)", sample))
+        else:
+            (blocking if is_blocking else advisory).append((rel, name, sample))
+
+for rel, name, sample in advisory[:10]:
+    print(f"pre-commit: note  {rel}: high-entropy {name} ({sample}) "
+          f"-- probably a Solidity constant", file=sys.stderr)
+
+if blocking:
+    print("\npre-commit: BLOCKED -- credential-shaped values in staged content:",
+          file=sys.stderr)
+    for rel, name, sample in blocking:
+        print(f"  {rel}: {name} = {sample}", file=sys.stderr)
+    print("\nReplace the value with a placeholder, or `git commit --no-verify` if"
+          " you have looked at it and it is a false positive.", file=sys.stderr)
+    sys.exit(1)
+PY

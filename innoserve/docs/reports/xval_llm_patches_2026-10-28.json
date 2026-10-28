@@ -1,0 +1,642 @@
+{
+ "patches": {
+  "2": {
+   "diff": "--- a/src/Target.sol\n+++ b/src/Target.sol\n@@ -21,11 +21,10 @@\n         uint256 amount = stakeOf[msg.sender];\n         require(amount > 0, \"no position\");\n \n-        // Deliberate reentrancy bug: state is cleared after the external call.\n+        // Fixed reentrancy: update state before external call.\n+        totalStaked -= amount;\n+        stakeOf[msg.sender] = 0;\n         (bool ok, ) = msg.sender.call{value: amount}(\"\");\n         require(ok, \"eth transfer failed\");\n-\n-        totalStaked -= amount;\n-        stakeOf[msg.sender] = 0;\n     }\n }\n",
+   "sha": "62e204d17086d63143b97412f0cfe902de94d6594fbf58a16c82a86f5ca11af8"
+  },
+  "3": {
+   "diff": "--- a/src/Target.sol\n+++ b/src/Target.sol\n@@ -17,15 +17,13 @@\n         totalStaked += msg.value;\n     }\n \n-    function unstake() external {\n-        uint256 amount = stakeOf[msg.sender];\n-        require(amount > 0, \"no position\");\n-\n-        // Deliberate reentrancy bug: state is cleared after the external call.\n-        (bool ok, ) = msg.sender.call{value: amount}(\"\");\n-        require(ok, \"eth transfer failed\");\n-\n-        totalStaked -= amount;\n-        stakeOf[msg.sender] = 0;\n-    }\n+function unstake() external {\n+    uint256 amount = stakeOf[msg.sender];\n+    require(amount > 0, \"no position\");\n+    // Fixed reentrancy: update state before external call.\n+    totalStaked -= amount;\n+    stakeOf[msg.sender] = 0;\n+    (bool ok, ) = msg.sender.call{value: amount}(\"\");\n+    require(ok, \"eth transfer failed\");\n }\n+}\n",
+   "sha": "857c523e8a8cee15a50524dcd4c4a8ac6bb3b9881d31654f3f935ceae09dddbc"
+  },
+  "4": {
+   "diff": "--- a/src/Target.sol\n+++ b/src/Target.sol\n@@ -21,11 +21,10 @@\n         uint256 amount = stakeOf[msg.sender];\n         require(amount > 0, \"no position\");\n \n-        // Deliberate reentrancy bug: state is cleared after the external call.\n-        (bool ok, ) = msg.sender.call{value: amount}(\"\");\n-        require(ok, \"eth transfer failed\");\n-\n-        totalStaked -= amount;\n-        stakeOf[msg.sender] = 0;\n+          // Fixed reentrancy: update state before external call (checks-effects-interactions).\n+          stakeOf[msg.sender] = 0;\n+          totalStaked -= amount;\n+          (bool ok, ) = msg.sender.call{value: amount}(\"\");\n+          require(ok, \"eth transfer failed\");\n     }\n }\n",
+   "sha": "4f12f7bc2df053b2bff6e651ead6cc87517797494acd2f5b8d96c5841f1587ca"
+  }
+ },
+ "cells": {
+  "2,2": {
+   "accepted": true,
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1297704)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ],
+   "honest_before": [
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000
+   ],
+   "patched_sha256": "62e204d17086d63143b97412f0cfe902de94d6594fbf58a16c82a86f5ca11af8"
+  },
+  "3,2": {
+   "accepted": true,
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1297704)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ],
+   "honest_before": [
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000
+   ],
+   "patched_sha256": "857c523e8a8cee15a50524dcd4c4a8ac6bb3b9881d31654f3f935ceae09dddbc"
+  },
+  "4,2": {
+   "accepted": true,
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1297704)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ],
+   "honest_before": [
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000
+   ],
+   "patched_sha256": "4f12f7bc2df053b2bff6e651ead6cc87517797494acd2f5b8d96c5841f1587ca"
+  },
+  "2,3": {
+   "accepted": true,
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1297704)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ],
+   "honest_before": [
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000
+   ],
+   "patched_sha256": "62e204d17086d63143b97412f0cfe902de94d6594fbf58a16c82a86f5ca11af8"
+  },
+  "3,3": {
+   "accepted": true,
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1297704)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ],
+   "honest_before": [
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000
+   ],
+   "patched_sha256": "857c523e8a8cee15a50524dcd4c4a8ac6bb3b9881d31654f3f935ceae09dddbc"
+  },
+  "4,3": {
+   "accepted": true,
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1297704)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ],
+   "honest_before": [
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000
+   ],
+   "patched_sha256": "4f12f7bc2df053b2bff6e651ead6cc87517797494acd2f5b8d96c5841f1587ca"
+  },
+  "2,4": {
+   "accepted": true,
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1297704)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ],
+   "honest_before": [
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000
+   ],
+   "patched_sha256": "62e204d17086d63143b97412f0cfe902de94d6594fbf58a16c82a86f5ca11af8"
+  },
+  "3,4": {
+   "accepted": true,
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1297704)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ],
+   "honest_before": [
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000
+   ],
+   "patched_sha256": "857c523e8a8cee15a50524dcd4c4a8ac6bb3b9881d31654f3f935ceae09dddbc"
+  },
+  "4,4": {
+   "accepted": true,
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1297704)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ],
+   "honest_before": [
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000
+   ],
+   "patched_sha256": "4f12f7bc2df053b2bff6e651ead6cc87517797494acd2f5b8d96c5841f1587ca"
+  },
+  "2,5": {
+   "accepted": true,
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1297704)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ],
+   "honest_before": [
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000
+   ],
+   "patched_sha256": "62e204d17086d63143b97412f0cfe902de94d6594fbf58a16c82a86f5ca11af8"
+  },
+  "3,5": {
+   "accepted": true,
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1297704)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ],
+   "honest_before": [
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000
+   ],
+   "patched_sha256": "857c523e8a8cee15a50524dcd4c4a8ac6bb3b9881d31654f3f935ceae09dddbc"
+  },
+  "4,5": {
+   "accepted": true,
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1297704)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ],
+   "honest_before": [
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000,
+    2000000000000000000
+   ],
+   "patched_sha256": "4f12f7bc2df053b2bff6e651ead6cc87517797494acd2f5b8d96c5841f1587ca"
+  }
+ }
+}

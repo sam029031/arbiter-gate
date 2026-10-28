@@ -1,0 +1,31 @@
+{
+ "schema": "arbiter-gate/0.1",
+ "generated_at": "2026-10-28T18:20:39+0800",
+ "input": {
+  "mode": "file",
+  "file": "/home/sam/innoserve/arbiter-audit/arbiter/examples/StakingVault.sol",
+  "run_id": "gate-StakingVault-20261028-182039-faf2fd",
+  "workspace_mode": "hermetic",
+  "llm_requests_this_invocation": 0
+ },
+ "models": [
+  "arbiter-gpt:latest"
+ ],
+ "patches_file": null,
+ "repair": false,
+ "exit_code": 2,
+ "files": [
+  {
+   "id": "file::StakingVault",
+   "path": null,
+   "verdict": "not_executed",
+   "label": "無法判定（稽核未完成）",
+   "reason": "toolchain_unavailable: forge not found on PATH",
+   "turns": 0,
+   "elapsed_s": null,
+   "findings": []
+  }
+ ],
+ "elapsed_s": 0.07,
+ "note": "已證實可攻擊的判定附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。"
+}

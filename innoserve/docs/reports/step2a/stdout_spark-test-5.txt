@@ -1,0 +1,15 @@
+ARBITER Gate  [from_results]  run_id=spark-test-5  models=arbiter-gpt:latest  LLM requests this invocation=0
+
+  已證實可攻擊（擋部署）  [proven_exploitable]  examples::StakingVault
+    Reentrancy in unstake() allows attacker to steal ether from other stakers
+    function: unstake  severity: High  predicate: victim_loss  proof: StakingVaultReentrancyExploitPoc
+    A/B/G: 已重現（合成層）
+      env  endow     warp     rounds   A(ETH)  B(ETH)  G(ETH)
+      0    10        0        1        2       2       1
+      1    10000     0        1        2       2       1
+      2    10        604800   1        2       2       1
+      3    10        0        8        2       0       7
+    patch: 未產生修補
+
+exit code 1
+gate.json: /home/sam/innoserve/reports/step2a/gate_spark-test-5.json

@@ -1,0 +1,24 @@
+  control chain (chain 31337, http://127.0.0.1:8600)
+    ok  deploy StakingVault (5 ETH)    tx=0xc2abd9446c00f8e5af5d5127a85b15e6c3412b31f525ade3355be3fd39c0c313  gas=0
+    ok  stake()                        tx=0xfe07e5bdbae29c340c1ed3893a8049e057ac36651a390b84b11c26c6f1364a1c  gas=48,810
+    ok  deploy Attacker (1 ETH)        tx=0x558135e78c50e81437b3f8bed1e933052bb828b23795708184f73636e13edead  gas=0
+    ok  unstake()                      tx=0x22337113b2593ae139790bc71497c7c64ff0cb52ba5bc2caf580a944ac418e47  gas=33,918
+    vault 7 ETH -> 7 ETH after attack step -> 5 ETH after victim exit
+  attack chain  (chain 31337, http://127.0.0.1:8601)
+    ok  deploy StakingVault (5 ETH)    tx=0xc2abd9446c00f8e5af5d5127a85b15e6c3412b31f525ade3355be3fd39c0c313  gas=0
+    ok  stake()                        tx=0xfe07e5bdbae29c340c1ed3893a8049e057ac36651a390b84b11c26c6f1364a1c  gas=48,810
+    ok  deploy Attacker (1 ETH)        tx=0x558135e78c50e81437b3f8bed1e933052bb828b23795708184f73636e13edead  gas=0
+    ok  attack()                       tx=0x57d1c672b4c590ea399ab2a8c73ffb845067906fec6682663b61336982a7cd2d  gas=132,142
+    REV unstake()                      tx=-  gas=0  (000000000000000000\": Error(\"eth transfer failed\")"}],"warnings":[]})
+    vault 7 ETH -> 0 ETH after attack step -> 0 ETH after victim exit
+
+  target: original
+  A  victim recovered, control chain          2 ETH
+  B  victim recovered, attack chain           0 ETH   (paid in 2 ETH)
+  G  attacker contract gain                   7 ETH   (net incl. gas 6.999911 ETH)
+     vault drained by the attack step         7 ETH
+
+  PROVEN on a live chain: value left the vault, the attacker holds it,
+  and the victim who staked 2 ETH did not get it back.
+
+  transcript: /home/sam/innoserve/reports/live_attack_stakingvault/original-3.json

@@ -1,0 +1,45 @@
+# Corpus and labels -- fetched, not authored. The Kaggle competition ran 1 Apr - 1 Jul
+# 2026 and its terms for redistributing the labelled findings are not stated anywhere
+# we could find, so the CSVs stay local and README documents how to fetch them.
+# data/splits.json is ours and is tracked: it holds only repository hashes, no labels,
+# and reproducing any measurement requires the exact partition.
+data/*.zip
+data/*.csv
+data/ex/
+
+# Upstream Bastet is cloned, not vendored. Our additions to it are mirrored into
+# bastet-cc/scripts/ so they are versioned without carrying someone else's tree.
+upstream-bastet/
+
+# Secrets. The AIS3 gateway token is issued per team and belongs in the environment.
+.env
+*.cookies
+**/kaggle.json
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Raw per-call transcripts: they embed contract source and prompts verbatim, and grow
+# with every run. The derived measurements beside them are what the writeup cites.
+# Leading **/ matters -- a bare `runs/` anchors to the repository root and silently
+# misses bastet-cc/runs/, which is where these actually live.
+**/runs/**/llm_log.jsonl
+**/runs/**/llm_calls.jsonl
+**/runs/**/results.jsonl
+**/runs/**/tasks.jsonl
+# What run.py, `cli.py audit` and `cli.py fix` actually write: <run_id>.results.jsonl
+# (source + full trace), .ledger.jsonl, .input.json and .patches.jsonl. The patterns
+# above only match files named exactly results.jsonl, so these were never ignored.
+**/runs/*.results.jsonl
+**/runs/*.ledger.jsonl
+**/runs/*.input.json
+**/runs/*.patches.jsonl
+
+# Foundry build artefacts from running the probes and the local demo in-tree.
+arbiter/cache/
+arbiter/out/
+# Per-job directories written by `python3 -m arbiter.gate --file` (run_arbiter output,
+# evidence workspaces, run.log).
+**/runs/gate/

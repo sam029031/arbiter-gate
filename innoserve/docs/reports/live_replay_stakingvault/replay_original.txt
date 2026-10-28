@@ -1,0 +1,16 @@
+exploit StakingVaultReentrancyExploitPoc (victim_loss) against the original target
+  template victim
+  world no attack  : victim recovered 7 ETH, attacker gain 0 ETH, target 7 ETH -> 0 ETH, exit_ok=True
+      ok  deploy ArbWorld (setup)      tx=0x7966524d0f3e59dc2c75c314fa4f065fffe1ca4bf9dca2ff3224823e62c1c00c  gas=0
+      ok  enter()                      tx=0x8f09a9a647836f38fbba2619970954482e9bfc9176d3014611127df987839eb3  gas=45821
+      ok  exit()                       tx=0x2d6a61ca7b56c53d8e0bb7b89c8e32b2d89945b376986f8cc46cd81017d7c346  gas=37168
+  world with attack: victim recovered 7 ETH, attacker gain 0 ETH, target 7 ETH -> 0 ETH, exit_ok=True
+      ok  deploy ArbWorld (setup)      tx=0x7966524d0f3e59dc2c75c314fa4f065fffe1ca4bf9dca2ff3224823e62c1c00c  gas=0
+      ok  enter()                      tx=0x8f09a9a647836f38fbba2619970954482e9bfc9176d3014611127df987839eb3  gas=45821
+      ok  deploy AttackerFactory       tx=0x2b1221319df93d4f418a6a1c05da5e444554bf8952e1e861923ec1f5161f5252  gas=0
+      ok  build(address)               tx=0xb058d301d100016e2b6264e6960385310161c10b0386a39050a501888c703c20  gas=330240
+      REV run()                        tx=  gas=0  note=000000000000000000000020000000000000000000000000000000000000000000000000000000000000000f61747461636b2072657665727465640000000000000000000000000000000000\": Error(\"attack reverted\")"}],"warnings":[]}
+      ok  sweep()                      tx=0x76a86ae3ad040c8c833fb5ad05313b082f6b3c14d8800a505c80b198f7988f58  gas=36286
+      ok  exit()                       tx=0x9a1ab53462f6234c5899b2d5d309f2a2bccd8e5557fe019a60aa93b88696718c  gas=37168
+  shortfall 0 ETH  attacker_gain 0 ETH  extracted_from_contract 0 ETH
+  live verdict: NOT PROVEN

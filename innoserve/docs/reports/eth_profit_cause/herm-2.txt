@@ -1,0 +1,11 @@
+ARBITER Gate  [file]  run_id=predexp-herm-2  models=arbiter-gpt:latest  LLM requests this invocation=5
+
+  已證實可攻擊（擋部署）  [proven_exploitable]  file::StakingVault
+    Re‑entrancy allows double withdrawal of staked ether
+    function: unstake  severity: High  predicate: eth_profit (strict=False)  proof: ReentrancyDrainExploitPoc
+    以寬鬆謂詞 eth_profit 證實；A/B/G 與修補目前只支援 victim_loss
+    A/B/G: 此謂詞或模式尚不支援 A/B/G -- predicate 'eth_profit' is not patched yet
+    patch: 未產生修補
+
+exit code 1
+gate.json: /home/sam/innoserve/reports/eth_profit_cause/gate_herm-2.json

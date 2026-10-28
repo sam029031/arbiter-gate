@@ -1,0 +1,106 @@
+{
+ "schema": "arbiter-gate/0.1",
+ "generated_at": "2026-10-28T18:22:03+0800",
+ "input": {
+  "mode": "file",
+  "file": "/home/sam/innoserve/arbiter-audit/arbiter/examples/StakingVault.sol",
+  "run_id": "gate-StakingVault-20261028-182059-747e83",
+  "workspace_mode": "hermetic",
+  "llm_requests_this_invocation": 3,
+  "usage": {
+   "requests": 3,
+   "prompt_tokens": 18457,
+   "completion_tokens": 2420,
+   "cost_usd": 0.0,
+   "retries": 0,
+   "http_errors": 0,
+   "parse_failures": 0,
+   "reasoning_recoveries": 2,
+   "system_fingerprints": [
+    "fp_ollama"
+   ],
+   "models_seen": [
+    "arbiter-gpt:latest"
+   ]
+  },
+  "results": "runs/gate/gate-StakingVault-20261028-182059-747e83/gate-StakingVault-20261028-182059-747e83.results.jsonl"
+ },
+ "models": [
+  "arbiter-gpt:latest"
+ ],
+ "patches_file": null,
+ "repair": false,
+ "exit_code": 1,
+ "files": [
+  {
+   "id": "file::StakingVault",
+   "path": null,
+   "verdict": "proven_exploitable",
+   "label": "已證實可攻擊（擋部署）",
+   "reason": "finding_submitted",
+   "turns": 3,
+   "elapsed_s": 64.21,
+   "findings": [
+    {
+     "title": "Re‑entrancy in unstake() allows an attacker to drain all ether from the vault",
+     "vulnerable_function": "unstake",
+     "severity": "Critical",
+     "vuln_class": "Re‑entrancy",
+     "poc_name": "ReentrancyDrainExploitPoc",
+     "offending_expression": "(bool ok, ) = msg.sender.call{value: amount}(\"\"); require(ok, \"eth transfer failed\"); totalStaked -= amount; stakeOf[msg.sender] = 0;",
+     "attack_path": "ReentrancyDrain",
+     "predicate": "eth_profit",
+     "abg": {
+      "status": "not_supported",
+      "environments": [
+       {
+        "env": 0,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 0,
+        "rounds": 1,
+        "A": null,
+        "B": null,
+        "G": null
+       },
+       {
+        "env": 1,
+        "endow_wei": 10000000000000000000000,
+        "warp_s": 0,
+        "rounds": 1,
+        "A": null,
+        "B": null,
+        "G": null
+       },
+       {
+        "env": 2,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 604800,
+        "rounds": 1,
+        "A": null,
+        "B": null,
+        "G": null
+       },
+       {
+        "env": 3,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 0,
+        "rounds": 8,
+        "A": null,
+        "B": null,
+        "G": null
+       }
+      ],
+      "note": "predicate 'eth_profit' is not patched yet",
+      "label": "此謂詞或模式尚不支援 A/B/G"
+     },
+     "patch": {
+      "status": "not_generated",
+      "label": "未產生修補"
+     }
+    }
+   ]
+  }
+ ],
+ "elapsed_s": 64.35,
+ "note": "已證實可攻擊的判定附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。"
+}

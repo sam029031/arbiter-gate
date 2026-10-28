@@ -1,0 +1,24 @@
+  control chain (chain 31337, http://127.0.0.1:8600)
+    ok  deploy StakingVault (5 ETH)    tx=0xeef6401f55436ca53ae14e3c0b0dbd0e0cf4f0cdcac55644b9437afcc200417d  gas=0
+    ok  stake()                        tx=0xfe07e5bdbae29c340c1ed3893a8049e057ac36651a390b84b11c26c6f1364a1c  gas=48,810
+    ok  deploy Attacker (1 ETH)        tx=0xfadf31a26559b19b571a7d6f3d73ff380359db3a5bffaa753beceec8c4436134  gas=0
+    ok  unstake()                      tx=0x58b56b8b8f2078cc03ad570e13f10d4b1b5aca62556e5cba8fcfe1548b5037c3  gas=33,918
+    vault 7 ETH -> 7 ETH after attack step -> 5 ETH after victim exit
+  attack chain  (chain 31337, http://127.0.0.1:8601)
+    ok  deploy StakingVault (5 ETH)    tx=0xeef6401f55436ca53ae14e3c0b0dbd0e0cf4f0cdcac55644b9437afcc200417d  gas=0
+    ok  stake()                        tx=0xfe07e5bdbae29c340c1ed3893a8049e057ac36651a390b84b11c26c6f1364a1c  gas=48,810
+    ok  deploy Attacker (1 ETH)        tx=0xfadf31a26559b19b571a7d6f3d73ff380359db3a5bffaa753beceec8c4436134  gas=0
+    REV attack()                       reverted: eth transfer failed
+        （節點在估算 gas 時就拒絕，交易沒有送出上鏈）
+    ok  unstake()                      tx=0x58b56b8b8f2078cc03ad570e13f10d4b1b5aca62556e5cba8fcfe1548b5037c3  gas=33,918
+    vault 7 ETH -> 7 ETH after attack step -> 5 ETH after victim exit
+
+  target: patched (/home/sam/innoserve/arbiter-audit/arbiter/runs/spark-test-2.patches.jsonl, arbiter-gpt:latest, 6 lines)
+  A  victim recovered, control chain          2 ETH
+  B  victim recovered, attack chain           2 ETH   (paid in 2 ETH)
+  G  attacker contract gain                   0 ETH   (net incl. gas 0 ETH)
+     vault drained by the attack step         0 ETH
+
+  NOT PROVEN. The transcript above is what actually happened.
+
+  transcript: /home/sam/innoserve/reports/rev_display_backup/patched-spark-test-2.json

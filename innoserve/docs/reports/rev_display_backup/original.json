@@ -1,0 +1,163 @@
+{
+ "meta": {
+  "target": "original",
+  "path": "/home/sam/innoserve/arbiter-audit/arbiter/examples/StakingVault.sol"
+ },
+ "verdict": {
+  "rule": "live_attack.py: drained > 0 and attacker_net > 0 and victim_recovered < victim_paid_in",
+  "A_recovered_control_wei": 2000000000000000000,
+  "B_recovered_attacked_wei": 0,
+  "G_attacker_contract_gain_wei": 7000000000000000000,
+  "attacker_net_incl_gas_wei": 6999910802701723680,
+  "target_drained_wei": 7000000000000000000,
+  "victim_paid_in_wei": 2000000000000000000,
+  "victim_shortfall_wei": 2000000000000000000,
+  "proven": true
+ },
+ "control": {
+  "with_attack": false,
+  "transcript": {
+   "chain_id": 31337,
+   "rpc": "http://127.0.0.1:8600",
+   "target": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+   "attacker_contract": "0x663F3ad617193148711d28f5334eE4Ed07016602",
+   "steps": [
+    {
+     "what": "deploy StakingVault (5 ETH)",
+     "actor": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+     "tx": "0xc2abd9446c00f8e5af5d5127a85b15e6c3412b31f525ade3355be3fd39c0c313",
+     "gas_used": 0,
+     "ok": true,
+     "note": ""
+    },
+    {
+     "what": "stake()",
+     "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+     "tx": "0xfe07e5bdbae29c340c1ed3893a8049e057ac36651a390b84b11c26c6f1364a1c",
+     "gas_used": 48810,
+     "ok": true,
+     "note": ""
+    },
+    {
+     "what": "deploy Attacker (1 ETH)",
+     "actor": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+     "tx": "0x558135e78c50e81437b3f8bed1e933052bb828b23795708184f73636e13edead",
+     "gas_used": 0,
+     "ok": true,
+     "note": ""
+    },
+    {
+     "what": "unstake()",
+     "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+     "tx": "0x22337113b2593ae139790bc71497c7c64ff0cb52ba5bc2caf580a944ac418e47",
+     "gas_used": 33918,
+     "ok": true,
+     "note": ""
+    }
+   ],
+   "balances": {
+    "before_attack": {
+     "target": 7000000000000000000,
+     "attacker_eoa": 998999760866257647568,
+     "attacker_contract": 1000000000000000000,
+     "victim": 997999957113790994900
+    },
+    "after_attack": {
+     "target": 7000000000000000000,
+     "attacker_eoa": 998999760866257647568,
+     "attacker_contract": 1000000000000000000,
+     "victim": 997999957113790994900
+    },
+    "after_victim_exit": {
+     "target": 5000000000000000000,
+     "attacker_eoa": 998999760866257647568,
+     "attacker_contract": 1000000000000000000,
+     "victim": 999999934218769253620
+    }
+   },
+   "verdict": {}
+  },
+  "recovered": 2000000000000000000,
+  "drained": 0,
+  "attacker_gain": 0,
+  "attacker_net": 0,
+  "exit_ok": true
+ },
+ "attacked": {
+  "with_attack": true,
+  "transcript": {
+   "chain_id": 31337,
+   "rpc": "http://127.0.0.1:8601",
+   "target": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+   "attacker_contract": "0x663F3ad617193148711d28f5334eE4Ed07016602",
+   "steps": [
+    {
+     "what": "deploy StakingVault (5 ETH)",
+     "actor": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+     "tx": "0xc2abd9446c00f8e5af5d5127a85b15e6c3412b31f525ade3355be3fd39c0c313",
+     "gas_used": 0,
+     "ok": true,
+     "note": ""
+    },
+    {
+     "what": "stake()",
+     "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+     "tx": "0xfe07e5bdbae29c340c1ed3893a8049e057ac36651a390b84b11c26c6f1364a1c",
+     "gas_used": 48810,
+     "ok": true,
+     "note": ""
+    },
+    {
+     "what": "deploy Attacker (1 ETH)",
+     "actor": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+     "tx": "0x558135e78c50e81437b3f8bed1e933052bb828b23795708184f73636e13edead",
+     "gas_used": 0,
+     "ok": true,
+     "note": ""
+    },
+    {
+     "what": "attack()",
+     "actor": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+     "tx": "0x57d1c672b4c590ea399ab2a8c73ffb845067906fec6682663b61336982a7cd2d",
+     "gas_used": 132142,
+     "ok": true,
+     "note": ""
+    },
+    {
+     "what": "unstake()",
+     "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+     "tx": "",
+     "gas_used": 0,
+     "ok": false,
+     "note": "000000000000000000200000000000000000000000000000000000000000000000000000000000000013657468207472616e73666572206661696c656400000000000000000000000000\\\": Error(\\\"eth transfer failed\\\")\"}],\"warnings\":[]}"
+    }
+   ],
+   "balances": {
+    "before_attack": {
+     "target": 7000000000000000000,
+     "attacker_eoa": 998999760866257647568,
+     "attacker_contract": 1000000000000000000,
+     "victim": 997999957113790994900
+    },
+    "after_attack": {
+     "target": 0,
+     "attacker_eoa": 998999671668959371248,
+     "attacker_contract": 8000000000000000000,
+     "victim": 997999957113790994900
+    },
+    "after_victim_exit": {
+     "target": 0,
+     "attacker_eoa": 998999671668959371248,
+     "attacker_contract": 8000000000000000000,
+     "victim": 997999957113790994900
+    }
+   },
+   "verdict": {}
+  },
+  "recovered": 0,
+  "drained": 7000000000000000000,
+  "attacker_gain": 7000000000000000000,
+  "attacker_net": 6999910802701723680,
+  "exit_ok": false
+ }
+}

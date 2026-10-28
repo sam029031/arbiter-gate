@@ -1,0 +1,10 @@
+ARBITER Gate  [file]  run_id=gate-StakingVault-20261028-182059-747e83  models=arbiter-gpt:latest  LLM requests this invocation=3
+
+  已證實可攻擊（擋部署）  [proven_exploitable]  file::StakingVault
+    Re‑entrancy in unstake() allows an attacker to drain all ether from the vault
+    function: unstake  severity: Critical  predicate: eth_profit  proof: ReentrancyDrainExploitPoc
+    A/B/G: 此謂詞或模式尚不支援 A/B/G -- predicate 'eth_profit' is not patched yet
+    patch: 未產生修補
+
+exit code 1
+gate.json: /home/sam/innoserve/reports/step2a/gate_live.json

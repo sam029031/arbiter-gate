@@ -1,0 +1,124 @@
+{
+ "results": "runs/spark-test-2.results.jsonl",
+ "poc": "StakingVaultReentrancyExploitPoc",
+ "predicate": "victim_loss",
+ "target": "original",
+ "template": "victim",
+ "record": {
+  "sample_id": "examples::StakingVault",
+  "recovered_clean": 7000000000000000000,
+  "recovered_attacked": 7000000000000000000,
+  "attacker_gain": 0,
+  "shortfall": 0,
+  "extracted_from_contract": 0,
+  "target_held_rose": false,
+  "proven": false,
+  "worlds": [
+   {
+    "with_attack": false,
+    "target": "0x8398bCD4f633C72939F9043dB78c574A91C99c0A",
+    "recovered": 7000000000000000000,
+    "target_drained": 7000000000000000000,
+    "target_held_end": 0,
+    "target_held_mid": 7000000000000000000,
+    "attacker_gain": 0,
+    "exit_ok": true,
+    "steps": [
+     {
+      "what": "deploy ArbWorld (setup)",
+      "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "tx": "0x7966524d0f3e59dc2c75c314fa4f065fffe1ca4bf9dca2ff3224823e62c1c00c",
+      "gas_used": 0,
+      "ok": true,
+      "note": ""
+     },
+     {
+      "what": "enter()",
+      "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "tx": "0x8f09a9a647836f38fbba2619970954482e9bfc9176d3014611127df987839eb3",
+      "gas_used": 45821,
+      "ok": true,
+      "note": ""
+     },
+     {
+      "what": "exit()",
+      "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "tx": "0x2d6a61ca7b56c53d8e0bb7b89c8e32b2d89945b376986f8cc46cd81017d7c346",
+      "gas_used": 37168,
+      "ok": true,
+      "note": ""
+     }
+    ]
+   },
+   {
+    "with_attack": true,
+    "target": "0x8398bCD4f633C72939F9043dB78c574A91C99c0A",
+    "recovered": 7000000000000000000,
+    "target_drained": 7000000000000000000,
+    "target_held_end": 0,
+    "target_held_mid": 7000000000000000000,
+    "attacker_gain": 0,
+    "exit_ok": true,
+    "steps": [
+     {
+      "what": "deploy ArbWorld (setup)",
+      "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "tx": "0x7966524d0f3e59dc2c75c314fa4f065fffe1ca4bf9dca2ff3224823e62c1c00c",
+      "gas_used": 0,
+      "ok": true,
+      "note": ""
+     },
+     {
+      "what": "enter()",
+      "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "tx": "0x8f09a9a647836f38fbba2619970954482e9bfc9176d3014611127df987839eb3",
+      "gas_used": 45821,
+      "ok": true,
+      "note": ""
+     },
+     {
+      "what": "deploy AttackerFactory",
+      "actor": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "tx": "0x2b1221319df93d4f418a6a1c05da5e444554bf8952e1e861923ec1f5161f5252",
+      "gas_used": 0,
+      "ok": true,
+      "note": ""
+     },
+     {
+      "what": "build(address)",
+      "actor": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "tx": "0xb058d301d100016e2b6264e6960385310161c10b0386a39050a501888c703c20",
+      "gas_used": 330240,
+      "ok": true,
+      "note": ""
+     },
+     {
+      "what": "run()",
+      "actor": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "tx": "",
+      "gas_used": 0,
+      "ok": false,
+      "note": "000000000000000000000020000000000000000000000000000000000000000000000000000000000000000f61747461636b2072657665727465640000000000000000000000000000000000\\\": Error(\\\"attack reverted\\\")\"}],\"warnings\":[]}"
+     },
+     {
+      "what": "sweep()",
+      "actor": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      "tx": "0x76a86ae3ad040c8c833fb5ad05313b082f6b3c14d8800a505c80b198f7988f58",
+      "gas_used": 36286,
+      "ok": true,
+      "note": ""
+     },
+     {
+      "what": "exit()",
+      "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      "tx": "0x9a1ab53462f6234c5899b2d5d309f2a2bccd8e5557fe019a60aa93b88696718c",
+      "gas_used": 37168,
+      "ok": true,
+      "note": ""
+     }
+    ]
+   }
+  ]
+ },
+ "tried": []
+}

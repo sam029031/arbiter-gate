@@ -1,0 +1,7 @@
+ARBITER Gate  [file]  run_id=gate-StakingVault-20261028-182039-faf2fd  models=arbiter-gpt:latest  LLM requests this invocation=0
+
+  無法判定（稽核未完成）  [not_executed]  file::StakingVault
+    reason: toolchain_unavailable: forge not found on PATH
+
+exit code 2
+gate.json: /home/sam/innoserve/reports/step2a/gate_noforge.json

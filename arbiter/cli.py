@@ -1,0 +1,747 @@
+#!/usr/bin/env python3
+"""Command line entry point for ARBITER runs and scoring."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from arbiter.run import load_evalset, run_arbiter, truth_map  # noqa: E402
+from arbiter.verdict import (  # noqa: E402
+    LABELS, NO_PROVABLE, NOT_EXECUTED, PROVEN, classify,
+)
+from arbiter.score import (  # noqa: E402
+    bootstrap_delta,
+    constant_no_baseline,
+    constant_yes_baseline,
+    mcnemar_exact,
+    summarise_runs,
+)
+
+
+def _repo_of(f: Path, roots: list[Path]) -> str:
+    """Which requested root this file came from, so repo-level scoring can group by it."""
+    for r in roots:
+        try:
+            if r.is_dir() and f.resolve().is_relative_to(r.resolve()):
+                return r.name
+        except (OSError, ValueError):
+            continue
+    return f.parent.name
+
+
+def _root_for(f: Path, roots: list[Path]) -> Path:
+    """The repository root a contract belongs to, for resolving its imports."""
+    for r in roots:
+        try:
+            if r.is_dir() and f.resolve().is_relative_to(r.resolve()):
+                return r.resolve()
+        except (OSError, ValueError):
+            continue
+    return f.resolve().parent
+
+
+# Subcommands that produce evidence by executing it. Without a compiler they cannot
+# find anything, and every non-vulnerable outcome maps to "safe" downstream -- so the
+# run would print CLEAR for every contract. Measured: forge off PATH, one contract with
+# a reproduced reentrancy, 0.01s, zero requests, "0/1 reported vulnerable, each backed
+# by an executed exploit". Refusing to start is the only honest behaviour.
+# Model default for subcommands that do not require --model: ARBITER_MODEL, then
+# AIS3_MODEL, then the model every committed AIS3-era summary was measured with.
+_DEFAULT_MODEL = (os.environ.get("ARBITER_MODEL") or os.environ.get("AIS3_MODEL")
+                  or "ais3/nemotron-3-ultra-550b")
+
+_NEEDS_FORGE = {"run", "audit", "broadside", "cascade", "dump", "bench",
+                "reconstruct", "prove", "fix"}
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="arbiter")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    r = sub.add_parser("run", help="run ARBITER over an evaluation set")
+    r.add_argument("--evalset", type=Path, required=True)
+    r.add_argument("--model", required=True)
+    r.add_argument("--run-id", required=True)
+    r.add_argument("--out", type=Path, default=Path("runs"))
+    r.add_argument("--repeats", type=int, default=1)
+    r.add_argument("--attempts", type=int, default=1,
+                   help="independent audit attempts per sample; unioned, stops on first proof")
+    r.add_argument("--concurrency", type=int, default=8)
+    r.add_argument("--max-turns", type=int, default=26)
+    r.add_argument("--max-tokens", type=int, default=4096)
+    r.add_argument("--rpm", type=int, default=45)
+    r.add_argument("--carry-ruled-out", action="store_true",
+                   help="carry failed hypotheses between attempts (measured harmful; off)")
+    r.add_argument("--proposals", type=Path, default=None,
+                   help="Bastet jobs.jsonl; enables cascade mode (detector hits become hypotheses)")
+
+    a = sub.add_parser(
+        "audit", help="audit .sol files directly, no evaluation set or labels needed"
+    )
+    a.add_argument("paths", type=Path, nargs="+", help=".sol files or directories")
+    a.add_argument("--model", default=_DEFAULT_MODEL)
+    a.add_argument("--run-id", default="audit")
+    a.add_argument("--out", type=Path, default=Path("runs"))
+    a.add_argument("--attempts", type=int, default=2)
+    a.add_argument("--max-turns", type=int, default=26)
+    a.add_argument("--concurrency", type=int, default=6)
+    a.add_argument("--rpm", type=int, default=45)
+    a.add_argument("--all-files", action="store_true",
+                   help="audit every .sol including interfaces, libraries and mocks")
+
+    bs = sub.add_parser(
+        "broadside", help="batch candidate generation, all executed in parallel"
+    )
+    bs.add_argument("--evalset", type=Path, required=True)
+    bs.add_argument("--model", default=_DEFAULT_MODEL)
+    bs.add_argument("--run-id", required=True)
+    bs.add_argument("--out", type=Path, default=Path("runs"))
+    bs.add_argument("-k", type=int, default=8, help="candidates per request")
+    bs.add_argument("--shards", type=int, default=1, help="generation requests per sample")
+    bs.add_argument("--concurrency", type=int, default=4, help="samples in flight")
+    bs.add_argument("--exec-workers", type=int, default=8, help="candidates compiled at once")
+    bs.add_argument("--rpm", type=int, default=45)
+
+    dp = sub.add_parser(
+        "dump", help="write every proven exploit as a runnable Foundry project"
+    )
+    dp.add_argument("--results", type=Path, required=True, help="a run's .results.jsonl")
+    dp.add_argument("--out", type=Path, required=True, help="directory to write into")
+    dp.add_argument("--evalset", type=Path, default=None,
+                    help="optional: supplies contract sources for older runs")
+
+    fx = sub.add_parser(
+        "fix",
+        help="propose patches for proven findings and keep only those the patch gate accepts",
+    )
+    fx.add_argument("--results", type=Path, required=True,
+                    help="runs/<run_id>.results.jsonl from `run` or `audit`")
+    fx.add_argument("--model", default=_DEFAULT_MODEL)
+    fx.add_argument("--rounds", type=int, default=3)
+    fx.add_argument("--only", default="", help="substring filter on the sample id")
+    fx.add_argument("--out", type=Path, default=None,
+                    help="default: <results dir>/<run_id>.patches.jsonl")
+    fx.add_argument("--workspace", type=Path, default=Path("/tmp/arbiter-fix"))
+
+    pv = sub.add_parser(
+        "prove",
+        help="walk every dumped exploit up the evidence ladder: harness, standalone, chain",
+    )
+    pv.add_argument("--dump", type=Path, required=True,
+                    help="directory written by `arbiter dump`")
+    pv.add_argument("--port", type=int, default=9400)
+    pv.add_argument("--only", default="", help="substring filter on the sample id")
+    pv.add_argument("--json", type=Path, default=None)
+
+    ev = sub.add_parser(
+        "eval", help="score a run in Bastet's own output format, for side-by-side reading"
+    )
+    ev.add_argument("--results", type=Path, required=True)
+    ev.add_argument("--by-repo", action="store_true",
+                    help="aggregate with Bastet's rule: a repo is positive iff any file is")
+    ev.add_argument("--truth", type=Path, default=None,
+                    help="Bastet's evaluation_results.csv, for repo-level labels")
+    ev.add_argument("--tag", default=None,
+                    help="score the class-conditional question Bastet's evaluator "
+                         "actually asks: does this repo contain a finding tagged X "
+                         "(its own default is Slippage). Needs --truth.")
+
+    s = sub.add_parser("score", help="score one arm's summary against ground truth")
+    s.add_argument("--summary", type=Path, required=True)
+    s.add_argument("--evalset", type=Path, required=True)
+
+    ba = sub.add_parser("bastet", help="run the Bastet baseline arm")
+    ba.add_argument("--evalset", type=Path, required=True)
+    ba.add_argument("--prompts", type=Path, required=True)
+    ba.add_argument("--model", required=True)
+    ba.add_argument("--run-id", required=True)
+    ba.add_argument("--out", type=Path, default=Path("runs"))
+    ba.add_argument("--repeats", type=int, default=1)
+    ba.add_argument("--concurrency", type=int, default=12)
+    ba.add_argument("--max-tokens", type=int, default=4096)
+    ba.add_argument("--rpm", type=int, default=45)
+
+    rc = sub.add_parser(
+        "reconstruct", help="restore compilation context for non-compiling samples"
+    )
+    rc.add_argument("--evalset", type=Path, required=True)
+    rc.add_argument("--out", type=Path, required=True)
+    rc.add_argument("--model", default=_DEFAULT_MODEL)
+    rc.add_argument("--rpm", type=int, default=45)
+
+    bm = sub.add_parser(
+        "bench", help="verify authored pairs and emit an evalset of the admitted ones"
+    )
+    bm.add_argument("--pairs", type=Path, required=True)
+    bm.add_argument("--out", type=Path, required=True)
+    bm.add_argument("--note", default="")
+    bm.add_argument("--strict", action="store_true",
+                    help="require honest_body, matching the bar the agent is held to")
+
+    cs = sub.add_parser(
+        "cascade",
+        help="generate broadly, adjudicate strictly -- the measured architecture",
+    )
+    cs.add_argument("--evalset", type=Path, required=True)
+    cs.add_argument("--model", default=_DEFAULT_MODEL)
+    cs.add_argument("--run-id", required=True)
+    cs.add_argument("--out", type=Path, default=Path("runs"))
+    cs.add_argument("--attempts", type=int, default=2)
+    cs.add_argument("--max-turns", type=int, default=26)
+    cs.add_argument("--concurrency", type=int, default=16)
+    cs.add_argument("--rpm", type=int, default=70)
+    cs.add_argument("--passes", default="broad,strict",
+                    help="comma-separated generation passes; 'broad' offers every "
+                         "predicate, 'strict' only the two that carry evidence")
+
+    c = sub.add_parser("compare", help="paired comparison of two arms")
+    c.add_argument("--a", type=Path, required=True, help="baseline arm summary")
+    c.add_argument("--b", type=Path, required=True, help="challenger arm summary")
+    c.add_argument("--evalset", type=Path, required=True)
+    c.add_argument("--out", type=Path)
+
+    args = ap.parse_args()
+
+    if args.cmd in _NEEDS_FORGE:
+        import shutil as _shutil
+
+        if _shutil.which("forge") is None:
+            print(
+                "forge is not on PATH. ARBITER produces evidence by executing it, so "
+                "without a compiler this run could only ever report every contract as "
+                "safe -- a clean answer nothing measured. Refusing to start. "
+                "Install foundry (https://getfoundry.sh) or add it to PATH.",
+                file=sys.stderr,
+            )
+            return 2
+
+    if args.cmd == "run":
+        summary = run_arbiter(
+            evalset=args.evalset,
+            model=args.model,
+            run_id=args.run_id,
+            out_dir=args.out,
+            repeats=args.repeats,
+            attempts=args.attempts,
+            concurrency=args.concurrency,
+            max_turns=args.max_turns,
+            max_tokens=args.max_tokens,
+            rpm=args.rpm,
+            proposals_path=args.proposals,
+            carry_ruled_out=args.carry_ruled_out,
+        )
+        _, items = load_evalset(args.evalset)
+        truth = truth_map(items)
+        runs = list(summary["predictions_by_repeat"].values())
+        agg = summarise_runs(runs, truth)
+        summary["scored"] = agg
+        Path(args.out / f"{args.run_id}.summary.json").write_text(
+            json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+        print(json.dumps({k: agg[k] for k in ("TP", "TN", "FP", "FN", "precision",
+                                              "recall", "specificity", "f1", "mcc")
+                          if k in agg}, indent=1))
+        print(f"usage: {json.dumps(summary['usage'])}")
+        return 0
+
+    if args.cmd == "audit":
+        # Real-world use: no ground truth, so nothing is scored. The output is the
+        # findings and the exploit that backs each one.
+        from arbiter.triage import triage_all
+
+        sols: list[Path] = []
+        for p in args.paths:
+            sols.extend(sorted(p.rglob("*.sol")) if p.is_dir() else [p])
+        if not sols:
+            print("no .sol files found")
+            return 1
+
+        # Most of a checkout is not attack surface. Skipping interfaces, type libraries
+        # and test scaffolding is a cost decision, not a verdict, so what was skipped and
+        # why is written out alongside the results rather than silently dropped.
+        skipped: list = []
+        if not args.all_files:
+            keep, skipped = triage_all(sols)
+            sols = [t.path for t in keep]
+            args.out.mkdir(parents=True, exist_ok=True)
+            (args.out / f"{args.run_id}.skipped.json").write_text(
+                json.dumps([t.as_dict() for t in skipped], ensure_ascii=False, indent=1),
+                encoding="utf-8",
+            )
+            reasons: dict[str, int] = {}
+            for t in skipped:
+                reasons[t.reason.split("(")[0].strip()] = (
+                    reasons.get(t.reason.split("(")[0].strip(), 0) + 1
+                )
+            print(f"triage: {len(sols)} of {len(sols) + len(skipped)} files carry "
+                  f"deployable, externally reachable state")
+            for reason, n in sorted(reasons.items(), key=lambda kv: -kv[1]):
+                print(f"  skipped {n:4d}  {reason}")
+            if not sols:
+                print("nothing left to audit; pass --all-files to override")
+                return 1
+        tmp = args.out / f"{args.run_id}.input.json"
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps({
+            "meta": {"source": "audit", "n": len(sols)},
+            "items": [
+                # id carries the repo so two contracts with the same basename in
+                # different repositories do not collide into one workspace.
+                {"id": f"{_repo_of(f, args.paths)}::{f.stem}", "label": "unknown",
+                 "repo": _repo_of(f, args.paths),
+                 # path and repo_root are what turn the hermetic workspace into an
+                 # in-repo one: the contract is compiled where it actually lives,
+                 # with its imports resolved, instead of as an orphaned file.
+                 "path": str(f.resolve()),
+                 "repo_root": str(_root_for(f, args.paths)),
+                 "code": f.read_text(encoding="utf-8", errors="ignore")}
+                for f in sols
+            ],
+        }, ensure_ascii=False), encoding="utf-8")
+        print(f"auditing {len(sols)} contract(s)")
+        results_path = args.out / f"{args.run_id}.results.jsonl"
+        resumed = (sum(1 for l in results_path.read_text(encoding="utf-8").splitlines()
+                       if l.strip()) if results_path.exists() else 0)
+        summary = run_arbiter(
+            evalset=tmp, model=args.model, run_id=args.run_id, out_dir=args.out,
+            repeats=1, attempts=args.attempts, concurrency=args.concurrency,
+            max_turns=args.max_turns, rpm=args.rpm,
+        )
+        rows = [
+            json.loads(l) for l in
+            (args.out / f"{args.run_id}.results.jsonl").read_text(encoding="utf-8").splitlines()
+            if l.strip()
+        ]
+        print()
+        verdicts = []
+        for r in rows:
+            o = r["outcome"]
+            v, why = classify(r)
+            verdicts.append(v)
+            if v != PROVEN:
+                # Never CLEAR: "found nothing" and "never ran" are different answers,
+                # and neither of them is "safe".
+                print(f"  {LABELS[v]}  {r['sample_id']}  [{v}: {why}]")
+                continue
+            for f in o["findings"]:
+                print(f"  VULNERABLE  {r['sample_id']}: {f.get('title','')}")
+                print(f"              function: {f.get('vulnerable_function','')}")
+                print(f"              severity: {f.get('severity','')}")
+                print(f"              proof:    {f.get('poc_name','')} "
+                      f"(executed, predicate satisfied)")
+        n_v = verdicts.count(PROVEN)
+        print()
+        print(f"{n_v}/{len(rows)} reported vulnerable, each backed by an executed exploit")
+        for v in (NO_PROVABLE, NOT_EXECUTED):
+            if verdicts.count(v):
+                print(f"{verdicts.count(v)}/{len(rows)} {LABELS[v]}")
+        print(f"full transcripts: {args.out / (args.run_id + '.results.jsonl')}")
+        print(f"usage: {json.dumps(summary['usage'])}")
+        if resumed:
+            print(f"note: {resumed} row(s) above were resumed from an earlier run under "
+                  f"run-id {args.run_id!r}, not re-audited. Use a new --run-id to re-audit.")
+        # An unrun audit must not exit as a success; a proven one keeps exit 0 here
+        # (blocking deployment on it is gate.py's job, not this report's).
+        return 2 if NOT_EXECUTED in verdicts else 0
+
+    if args.cmd == "broadside":
+        import os, threading, time
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from arbiter.broadside import broadside_audit
+        from arbiter.gateway import Gateway, RateLimiter
+
+        meta, items = load_evalset(args.evalset)
+        truth = truth_map(items)
+        args.out.mkdir(parents=True, exist_ok=True)
+        gw = Gateway(model=args.model, limiter=RateLimiter(args.rpm),
+                     ledger_path=args.out / f"{args.run_id}.ledger.jsonl")
+        rp = args.out / f"{args.run_id}.results.jsonl"
+        done = set()
+        if rp.exists():
+            for ln in rp.read_text(encoding="utf-8").splitlines():
+                try: done.add(json.loads(ln)["sample_id"])
+                except Exception: pass
+        lock = threading.Lock()
+        t0 = time.monotonic()
+
+        def one(item):
+            if item["id"] in done: return
+            res = broadside_audit(gw, item["id"], item["code"],
+                                  Path("/tmp/broadside") / args.run_id,
+                                  k=args.k, shards=args.shards,
+                                  workers=args.exec_workers)
+            pred = "vuln" if res.verdict == "vulnerable" else "safe"
+            row = {"sample_id": item["id"], "truth": item["label"],
+                   "predicted": pred, "repeat": 0, "result": res.as_dict()}
+            with lock:
+                with rp.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(row, ensure_ascii=False) + chr(10))
+                    fh.flush(); os.fsync(fh.fileno())
+            d = res.as_dict()
+            mark = "OK " if pred == item["label"] else "MISS"
+            print(f"  [{mark}] {item['id'][:44]:46s} -> {pred:5s} "
+                  f"({d['n_compiled']}/{d['n_candidates']} built, "
+                  f"{d['n_passed']} passed, {res.requests} req)", flush=True)
+
+        print(f"BROADSIDE  model={args.model}  samples={len(items)}  "
+              f"k={args.k} x {args.shards} shards  rpm={args.rpm}", flush=True)
+        with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+            for f in as_completed([pool.submit(one, i) for i in items]):
+                try: f.result()
+                except Exception as e: print(f"  [ERR ] {type(e).__name__}: {e}", flush=True)
+
+        rows = [json.loads(l) for l in rp.read_text(encoding="utf-8").splitlines() if l.strip()]
+        preds = {r["sample_id"]: r["predicted"] for r in rows}
+        agg = summarise_runs([preds], truth)
+        summary = {"arm": "broadside", "run_id": args.run_id, "model": args.model,
+                   "evalset": str(args.evalset), "k": args.k, "shards": args.shards,
+                   "wall_clock_s": round(time.monotonic() - t0, 1),
+                   "usage": gw.usage.as_dict(),
+                   "predictions_by_repeat": {"0": preds}, "scored": agg}
+        (args.out / f"{args.run_id}.summary.json").write_text(
+            json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(json.dumps(agg, indent=1))
+        print(f"usage: {json.dumps(summary['usage'])}")
+        return 0
+
+    if args.cmd == "cascade":
+        # Breadth and strictness are different knobs, and wiring the strict predicates
+        # into the generator cost five net true positives on a measured run. So each pass
+        # GENERATES under its own predicate set, the passes are unioned, and the gates are
+        # applied afterwards -- to what was found, never to what is looked for.
+        from arbiter.tools import ALL_PREDICATES, STRICT_PREDICATES
+
+        sets = {"broad": ALL_PREDICATES, "strict": STRICT_PREDICATES}
+        passes = [p.strip() for p in args.passes.split(",") if p.strip()]
+        unknown = [p for p in passes if p not in sets]
+        if unknown:
+            print(f"unknown pass(es): {unknown}; choose from {sorted(sets)}")
+            return 1
+
+        produced: list[Path] = []
+        for name in passes:
+            run_id = f"{args.run_id}-{name}"
+            print(f"\n=== pass {name!r}: predicates {sets[name]}", flush=True)
+            run_arbiter(
+                evalset=args.evalset, model=args.model, run_id=run_id, out_dir=args.out,
+                attempts=args.attempts, max_turns=args.max_turns,
+                concurrency=args.concurrency, rpm=args.rpm, predicates=sets[name],
+            )
+            produced.append(args.out / f"{run_id}.results.jsonl")
+
+        print("\n=== adjudication: every accepted exploit re-run through the gates",
+              flush=True)
+        from arbiter.cascade_lib import adjudicate, render_cascade
+
+        report = adjudicate(produced, args.out / f"{args.run_id}.cascade.jsonl")
+        _, items = load_evalset(args.evalset)
+        print(render_cascade(report, truth_map(items)))
+        (args.out / f"{args.run_id}.cascade.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+        return 0
+
+    if args.cmd == "dump":
+        from arbiter.dump import dump_run
+
+        # Older runs predate sources being stored in the record; splice them back in.
+        if args.evalset:
+            _, items = load_evalset(args.evalset)
+            src = {i["id"]: i["code"] for i in items}
+            patched = args.results.parent / (args.results.stem + ".withsrc.jsonl")
+            out_lines = []
+            for line in args.results.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                row.setdefault("source", src.get(row.get("sample_id"), ""))
+                out_lines.append(json.dumps(row, ensure_ascii=False))
+            patched.write_text(chr(10).join(out_lines), encoding="utf-8")
+            args.results = patched
+
+        man = dump_run(args.results, args.out)
+        print(f"wrote {man['exploits_written']} runnable exploit project(s) to {args.out}")
+        print(f"{man['exploits_reproduced']} of them re-ran green outside the harness")
+        print(f"{man['samples_without_admissible_exploit']} sample(s) had no admissible exploit")
+        for e in man["exploits"][:25]:
+            mark = "reproduced" if e.get("reproduces") else "DID NOT RUN"
+            print(f"  [{mark:11s}] {e['sample_id'][:38]:40s} {e['predicate']:14s} "
+                  f"{e['title'][:52]}")
+        if man["exploits"]:
+            print()
+            print(f"reproduce any of them:  cd {man['exploits'][0]['path']} && forge test -vvv")
+        return 0
+
+    if args.cmd == "fix":
+        import os as _os
+        from arbiter.gateway import Gateway
+        from arbiter.patch import exploit_from_row, repair
+
+        stem = args.results.name.removesuffix(".results.jsonl")
+        out = args.out or args.results.with_name(f"{stem}.patches.jsonl")
+        done = set()
+        if out.exists():
+            done = {json.loads(l)["sample_id"] for l in out.read_text().splitlines() if l.strip()}
+        gateway = Gateway(model=args.model,
+                          ledger_path=out.with_name(f"{stem}.fix.ledger.jsonl"))
+        n = 0
+        for line in args.results.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if args.only not in row["sample_id"] or row["sample_id"] in done:
+                continue
+            if not row["outcome"].get("proven"):
+                continue
+            try:
+                exploit = exploit_from_row(row)
+            except ValueError as exc:
+                rec = {"sample_id": row["sample_id"], "status": "skipped",
+                       "skip_reason": str(exc), "model": args.model}
+            else:
+                print(f"fix {row['sample_id']}: up to {args.rounds} round(s)")
+                rec = repair(gateway, exploit, root=args.workspace, rounds=args.rounds,
+                             on_round=lambda r: print(
+                                 f"  round {r['round']}: "
+                                 f"{'accepted' if r['first_failure'] is None else r['message'].splitlines()[0][:110]}"))
+            with out.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                fh.flush()
+                _os.fsync(fh.fileno())
+            n += 1
+            label = {"accepted": "修補已通過驗證（針對此攻擊）",
+                     "rejected": "未能產生通過驗證的修補",
+                     "skipped": "略過"}[rec["status"]]
+            print(f"  {label}  {rec['sample_id']}  "
+                  f"[{rec['status']}{': ' + rec['skip_reason'] if rec.get('skip_reason') else ''}]")
+        print(f"{n} finding(s) processed -> {out}")
+        print(f"usage: {json.dumps(gateway.usage.as_dict())}")
+        return 0
+
+    if args.cmd == "prove":
+        import shutil as _shutil
+
+        # Rung three needs a chain. Without one the command would quietly report that
+        # nothing reached it, which reads as a result rather than as a missing tool.
+        if _shutil.which("anvil") is None:
+            print("anvil is not on PATH, so no finding can be tested on a chain. "
+                  "Refusing to report a ladder whose top rung was never run.")
+            return 2
+        from arbiter.prove import prove_dump, render
+
+        report = prove_dump(args.dump, port=args.port, only=args.only)
+        print(render(report))
+        if args.json:
+            args.json.write_text(json.dumps(report, indent=1), encoding="utf-8")
+            print()
+            print(f"full transcripts: {args.json}")
+        return 0
+
+    if args.cmd == "eval":
+        from arbiter.evaluate import (
+            load_repo_truth, load_results, load_scored_rows, render, score_by_tag,
+            score_repos, score_samples,
+        )
+
+        rows = load_results(args.results)
+        if args.tag:
+            if not args.truth:
+                print("--tag needs --truth pointing at evaluation_results.csv")
+                return 1
+            scored = load_scored_rows(args.truth)
+            counts, detail = score_by_tag(rows, scored, args.tag)
+            print(f"class-conditional question: does the repository contain a "
+                  f"{args.tag!r} finding?")
+            print(f"scored on the same {len(scored)} rows as the baseline run\n")
+            print(render(counts))
+            print()
+            print(f"{'repository':<32} {'truth':<7} {'ours':<7} proven classes")
+            for repo, actual, predicted, note in detail:
+                mark = " " if actual == predicted else "*"
+                print(f"{mark}{repo[:31]:<31} "
+                      f"{'yes' if actual else 'no':<7} "
+                      f"{'yes' if predicted else 'no':<7} {note[:60]}")
+            print()
+            print("* marks a disagreement. Note that the row set contains repositories "
+                  "labelled both yes and no for the same tag, so 20/20 is unreachable "
+                  "for any repository-level predictor.")
+            return 0
+        if args.by_repo:
+            if not args.truth:
+                print("--by-repo needs --truth pointing at evaluation_results.csv")
+                return 1
+            counts, detail = score_repos(rows, load_repo_truth(args.truth))
+            print(render(counts))
+            print()
+            print(f"{'repository':<34} {'truth':<7} {'ours':<7} flagged/files")
+            for repo, actual, predicted, flagged, total in detail:
+                mark = " " if actual == predicted else "*"
+                print(f"{mark}{repo[:33]:<33} "
+                      f"{'vuln' if actual else 'safe':<7} "
+                      f"{'vuln' if predicted else 'safe':<7} {flagged}/{total}")
+            print()
+            print("* marks a disagreement with the labels. Aggregation is Bastet's own "
+                  "rule: a repository counts positive if ANY contract in it does.")
+        else:
+            print(render(score_samples(rows)))
+        return 0
+
+    if args.cmd == "bastet":
+        from arbiter.bastet_arm import run_bastet
+
+        summary = run_bastet(
+            evalset=args.evalset,
+            prompts_dir=args.prompts,
+            model=args.model,
+            run_id=args.run_id,
+            out_dir=args.out,
+            repeats=args.repeats,
+            concurrency=args.concurrency,
+            max_tokens=args.max_tokens,
+            rpm=args.rpm,
+        )
+        _, items = load_evalset(args.evalset)
+        truth = truth_map(items)
+        runs = list(summary["predictions_by_repeat"].values())
+        agg = summarise_runs(runs, truth)
+        summary["scored"] = agg
+        (args.out / f"{args.run_id}.summary.json").write_text(
+            json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+        print(json.dumps(agg, indent=1))
+        print(f"usage: {json.dumps(summary['usage'])}")
+        return 0
+
+    if args.cmd == "reconstruct":
+        from arbiter.gateway import Gateway
+        from arbiter.reconstruct import pair_key, reconstruct_group
+
+        data = json.loads(args.evalset.read_text(encoding="utf-8"))
+        items = data["items"]
+        gw = Gateway(model=args.model, rpm=args.rpm)
+
+        groups: dict[str, list] = {}
+        for item in items:
+            groups.setdefault(pair_key(item["id"]), []).append(item)
+
+        rebuilt: dict[str, str] = {}
+        report = []
+        for key, group in groups.items():
+            names = ", ".join(g["id"] for g in group)
+            res = reconstruct_group(gw, group, Path("/tmp/arbiter-recon"))
+            status = "native" if res.attempts == 0 else ("OK" if res.ok else "FAILED")
+            print(f"[{status:6s}] {key:20s} attempts={res.attempts}  {names}")
+            if not res.ok:
+                print(f"          {res.error}")
+            for g in group:
+                if res.ok:
+                    rebuilt[g["id"]] = res.sources[g["id"]]
+            report.append({
+                "group": key, "samples": [g["id"] for g in group], "ok": res.ok,
+                "attempts": res.attempts, "error": res.error,
+                "preserved": res.preserved, "native": res.attempts == 0,
+            })
+
+        out_items = []
+        for item in items:
+            if item["id"] not in rebuilt:
+                continue
+            new = dict(item)
+            new["code"] = rebuilt[item["id"]]
+            new["reconstructed"] = any(
+                r["group"] == pair_key(item["id"]) and not r["native"] for r in report
+            )
+            out_items.append(new)
+
+        meta = dict(data.get("meta", {}))
+        meta["derived_from"] = str(args.evalset)
+        meta["n"] = len(out_items)
+        meta["n_vuln"] = sum(1 for i in out_items if i["label"] == "vuln")
+        meta["n_safe"] = sum(1 for i in out_items if i["label"] == "safe")
+        meta["reconstruction"] = (
+            "Samples that did not compile had their stripped compilation context "
+            "restored by an LLM under three enforced constraints: additions only, every "
+            "significant original line verified present verbatim, and one shared prelude "
+            "per vulnerable/patched pair so the pair still differs only by the fix. "
+            "Stubs are ours, not the original project's, so reconstructed and natively "
+            "compiling samples are reported separately."
+        )
+        meta["reconstruction_report"] = report
+        args.out.write_text(
+            json.dumps({"meta": meta, "items": out_items}, ensure_ascii=False, indent=1),
+            encoding="utf-8",
+        )
+        n_ok = sum(1 for r in report if r["ok"])
+        print(f"\n{n_ok}/{len(report)} groups usable -> {len(out_items)} samples")
+        print(f"usage: {json.dumps(gw.usage.as_dict())}")
+        return 0
+
+    if args.cmd == "bench":
+        from arbiter.benchmark import build_evalset
+
+        raw = json.loads(args.pairs.read_text(encoding="utf-8"))
+        pairs = raw["pairs"] if isinstance(raw, dict) else raw
+        meta = build_evalset(
+            pairs, Path("/tmp/arbiter-bench"), args.out, source_note=args.note,
+            strict=args.strict,
+        )
+        print(
+            f"\n{meta['pairs_admitted']}/{meta['pairs_offered']} pairs admitted "
+            f"-> {meta['n']} samples ({meta['n_vuln']} vuln / {meta['n_safe']} safe)"
+        )
+        return 0
+
+    if args.cmd == "score":
+        summary = json.loads(args.summary.read_text(encoding="utf-8"))
+        _, items = load_evalset(args.evalset)
+        truth = truth_map(items)
+        runs = list(summary["predictions_by_repeat"].values())
+        print(json.dumps(summarise_runs(runs, truth), indent=1))
+        return 0
+
+    if args.cmd == "compare":
+        a = json.loads(args.a.read_text(encoding="utf-8"))
+        b = json.loads(args.b.read_text(encoding="utf-8"))
+        _, items = load_evalset(args.evalset)
+        truth = truth_map(items)
+        a_runs = list(a["predictions_by_repeat"].values())
+        b_runs = list(b["predictions_by_repeat"].values())
+        floor = constant_yes_baseline(truth)
+        report = {
+            "evalset": str(args.evalset),
+            "n_samples": len(truth),
+            "constant_yes_floor": floor.as_dict(),
+            "constant_no_floor": constant_no_baseline(truth).as_dict(),
+            "arm_a": {"name": a.get("arm"), "model": a.get("model"),
+                      "scored": summarise_runs(a_runs, truth),
+                      "usage": a.get("usage")},
+            "arm_b": {"name": b.get("arm"), "model": b.get("model"),
+                      "scored": summarise_runs(b_runs, truth),
+                      "usage": b.get("usage")},
+            "same_model": a.get("model") == b.get("model"),
+            "mcnemar_first_repeat": mcnemar_exact(a_runs[0], b_runs[0], truth),
+            # Every metric, not just the one we happen to lose. Reporting a confidence
+            # interval for F1 alone while promoting MCC and specificity as decisive was
+            # selective: the metrics carrying the claim were the ones never given an
+            # interval, and MCC's turns out to include zero.
+            "bootstrap": {
+                m: bootstrap_delta(a_runs[0], b_runs[0], truth, m)
+                for m in ("f1", "precision", "recall", "specificity", "accuracy", "mcc")
+            },
+        }
+        text = json.dumps(report, ensure_ascii=False, indent=1)
+        if args.out:
+            args.out.write_text(text, encoding="utf-8")
+        print(text)
+        return 0
+
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

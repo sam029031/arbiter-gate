@@ -1,0 +1,30 @@
+{
+ "schema": "arbiter-gate/0.1",
+ "generated_at": "2026-10-28T18:20:39+0800",
+ "input": {
+  "mode": "from_results",
+  "results": "runs/spark-test-1.results.jsonl",
+  "run_id": "spark-test-1",
+  "llm_requests_this_invocation": 0
+ },
+ "models": [
+  "arbiter-gpt:latest"
+ ],
+ "patches_file": null,
+ "repair": false,
+ "exit_code": 0,
+ "files": [
+  {
+   "id": "examples::StakingVault",
+   "path": "/home/sam/innoserve/arbiter-audit/arbiter/examples/StakingVault.sol",
+   "verdict": "no_provable_attack",
+   "label": "未發現可證明攻擊（不等於安全）",
+   "reason": "agent_concluded_no_attack",
+   "turns": 4,
+   "elapsed_s": 184.23,
+   "findings": []
+  }
+ ],
+ "elapsed_s": 0.04,
+ "note": "已證實可攻擊的判定附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。"
+}

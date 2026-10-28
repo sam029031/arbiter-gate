@@ -1,0 +1,7 @@
+ARBITER Gate  [from_results]  run_id=spark-test-1  models=arbiter-gpt:latest  LLM requests this invocation=0
+
+  未發現可證明攻擊（不等於安全）  [no_provable_attack]  examples::StakingVault
+    reason: agent_concluded_no_attack
+
+exit code 0
+gate.json: /home/sam/innoserve/reports/step2a/gate_spark-test-1.json

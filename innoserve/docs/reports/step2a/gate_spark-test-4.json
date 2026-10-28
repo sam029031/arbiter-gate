@@ -1,0 +1,138 @@
+{
+ "schema": "arbiter-gate/0.1",
+ "generated_at": "2026-10-28T18:20:30+0800",
+ "input": {
+  "mode": "from_results",
+  "results": "runs/spark-test-4.results.jsonl",
+  "run_id": "spark-test-4",
+  "llm_requests_this_invocation": 0
+ },
+ "models": [
+  "arbiter-gpt:latest"
+ ],
+ "patches_file": "runs/spark-test-4.patches.jsonl",
+ "repair": false,
+ "exit_code": 1,
+ "files": [
+  {
+   "id": "examples::StakingVault",
+   "path": "/home/sam/innoserve/arbiter-audit/arbiter/examples/StakingVault.sol",
+   "verdict": "proven_exploitable",
+   "label": "已證實可攻擊（擋部署）",
+   "reason": "finding_submitted",
+   "turns": 7,
+   "elapsed_s": 124.81,
+   "findings": [
+    {
+     "title": "Re‑entrancy in unstake() allows attacker to steal ether from other stakers",
+     "vulnerable_function": "unstake",
+     "severity": "High",
+     "vuln_class": "Reentrancy",
+     "poc_name": "StakingVaultReentrancyExploitPoc",
+     "offending_expression": "        // Deliberate reentrancy bug: state is cleared after the external call.\n        (bool ok, ) = msg.sender.call{value: amount}(\"\");\n        require(ok, \"eth transfer failed\");",
+     "attack_path": "StakingVault.sol",
+     "predicate": "victim_loss",
+     "abg": {
+      "status": "measured",
+      "environments": [
+       {
+        "env": 0,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 0,
+        "rounds": 1,
+        "A": 2000000000000000000,
+        "B": 2000000000000000000,
+        "G": 1000000000000000000
+       },
+       {
+        "env": 1,
+        "endow_wei": 10000000000000000000000,
+        "warp_s": 0,
+        "rounds": 1,
+        "A": 2000000000000000000,
+        "B": 2000000000000000000,
+        "G": 1000000000000000000
+       },
+       {
+        "env": 2,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 604800,
+        "rounds": 1,
+        "A": 2000000000000000000,
+        "B": 2000000000000000000,
+        "G": 1000000000000000000
+       },
+       {
+        "env": 3,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 0,
+        "rounds": 8,
+        "A": 2000000000000000000,
+        "B": 0,
+        "G": 7000000000000000000
+       }
+      ],
+      "label": "已重現（合成層）"
+     },
+     "patch": {
+      "status": "verified",
+      "label": "修補已通過驗證（針對此攻擊）",
+      "origin": "patches_file",
+      "model": "arbiter-gpt:latest",
+      "rationale": "Moved state updates before the external call to eliminate re‑entrancy while preserving the original behavior.",
+      "diff": "--- a/src/Target.sol\n+++ b/src/Target.sol\n@@ -21,11 +21,10 @@\n         uint256 amount = stakeOf[msg.sender];\n         require(amount > 0, \"no position\");\n \n-        // Deliberate reentrancy bug: state is cleared after the external call.\n-        (bool ok, ) = msg.sender.call{value: amount}(\"\");\n-        require(ok, \"eth transfer failed\");\n-\n-        totalStaked -= amount;\n-        stakeOf[msg.sender] = 0;\n+          // Fixed reentrancy: update state before external call (checks-effects-interactions).\n+          stakeOf[msg.sender] = 0;\n+          totalStaked -= amount;\n+          (bool ok, ) = msg.sender.call{value: amount}(\"\");\n+          require(ok, \"eth transfer failed\");\n     }\n }\n",
+      "diff_ignore_whitespace": "--- a/src/Target.sol (whitespace ignored, display only)\n+++ b/src/Target.sol (whitespace ignored, display only)\n@@ -21,11 +21,10 @@\n         uint256 amount = stakeOf[msg.sender];\n         require(amount > 0, \"no position\");\n \n-        // Deliberate reentrancy bug: state is cleared after the external call.\n+          // Fixed reentrancy: update state before external call (checks-effects-interactions).\n+          stakeOf[msg.sender] = 0;\n+          totalStaked -= amount;\n           (bool ok, ) = msg.sender.call{value: amount}(\"\");\n           require(ok, \"eth transfer failed\");\n-\n-        totalStaked -= amount;\n-        stakeOf[msg.sender] = 0;\n     }\n }\n",
+      "changed_lines": 6,
+      "gate_checks": {
+       "0": "pass",
+       "L": "pass",
+       "3": "pass",
+       "1": "pass",
+       "2": "pass"
+      },
+      "after": [
+       {
+        "env": 0,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 0,
+        "rounds": 1,
+        "A": 2000000000000000000,
+        "B": 2000000000000000000,
+        "G": 0
+       },
+       {
+        "env": 1,
+        "endow_wei": 10000000000000000000000,
+        "warp_s": 0,
+        "rounds": 1,
+        "A": 2000000000000000000,
+        "B": 2000000000000000000,
+        "G": 0
+       },
+       {
+        "env": 2,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 604800,
+        "rounds": 1,
+        "A": 2000000000000000000,
+        "B": 2000000000000000000,
+        "G": 0
+       },
+       {
+        "env": 3,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 0,
+        "rounds": 8,
+        "A": 2000000000000000000,
+        "B": 2000000000000000000,
+        "G": 0
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ],
+ "elapsed_s": 1.24,
+ "note": "已證實可攻擊的判定附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。"
+}
