@@ -25,9 +25,11 @@ clone() {  # clone <dir> <url> <tag>
     echo "  ok    $dir @ $tag"
   else
     echo "  FAIL  $dir @ $tag"
+    failed=$((failed + 1))
     return 1
   fi
 }
+failed=0
 
 echo "vendoring solidity dependencies into $CACHE"
 
@@ -43,7 +45,9 @@ clone uniswap-v2-core   https://github.com/Uniswap/v2-core.git                  
 clone uniswap-v2-periphery https://github.com/Uniswap/v2-periphery.git                         master
 clone uniswap-v3-core   https://github.com/Uniswap/v3-core.git                                 v1.0.0
 clone uniswap-v3-periphery https://github.com/Uniswap/v3-periphery.git                         v1.3.0
-clone chainlink         https://github.com/smartcontractkit/chainlink-brownie-contracts.git    v0.8.0
+# The brownie mirror tags releases without a "v" (0.8.0, 1.x); v0.8.0 does not exist,
+# and a missing tag used to fail silently, leaving the image without chainlink.
+clone chainlink         https://github.com/smartcontractkit/chainlink-brownie-contracts.git    0.8.0
 
 # hardhat/console.sol is a debug shim with no package worth cloning; contracts import it
 # and it must exist or the closure fails to resolve. Writing it is exact, not a stub:
@@ -76,3 +80,9 @@ echo "  ok    hardhat-shim"
 echo
 du -sh "$CACHE" 2>/dev/null
 ls "$CACHE"
+# A missing package makes every contract that imports it "not executed", silently, so the
+# image build stops here instead.
+if [ "$failed" -gt 0 ]; then
+  echo "$failed package(s) failed to clone" >&2
+  exit 1
+fi

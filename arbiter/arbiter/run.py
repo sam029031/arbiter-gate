@@ -58,8 +58,22 @@ def run_arbiter(
     carry_ruled_out: bool = False,
     api_key: str | None = None,
     predicates: tuple[str, ...] | None = None,
+    proposal_renderer: Any = None,
+    on_turn: Any = None,
+    on_row: Any = None,
+    on_request: Any = None,
 ) -> dict[str, Any]:
+    """`proposal_renderer(hits, rarity) -> str` replaces proposal_block (whose wording
+    describes Bastet) for another proposal source; None keeps proposal_block.
+
+    Progress hooks, all optional and off by default (plan Step 3; agent.py unchanged):
+    `on_turn(event)` fires as each agent turn lands in the trace -- the model has chosen
+    its tools, they have not run yet -- with sample, attempt, turn, the turn budget and
+    the tool calls; `on_row(row)` after a sample's row is written; `on_request(messages,
+    tag)` is handed to the gateway and fires before every model request, so the previous
+    tool results are visible to whoever listens. A hook that raises is ignored."""
     meta, items = load_evalset(evalset)
+    render = proposal_renderer or proposal_block
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Cascade mode: a cheap detector proposes classes, the execution gate adjudicates.
@@ -78,6 +92,8 @@ def run_arbiter(
         limiter=limiter,
         ledger_path=out_dir / f"{run_id}.ledger.jsonl",
     )
+    if on_request is not None:
+        gateway.on_request = on_request
 
     results_path = out_dir / f"{run_id}.results.jsonl"
     done: set[str] = set()
@@ -132,6 +148,7 @@ def run_arbiter(
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
                 fh.flush()
                 os.fsync(fh.fileno())
+        _safe_call(on_row, row)
         hit = "OK " if row["predicted"] == row["truth"] else "MISS"
         proven = "proven" if outcome.proven else outcome.stop_reason
         print(
@@ -204,7 +221,11 @@ def run_arbiter(
         # only on samples we are failing to crack.
         ruled_out: list[str] = []
         for attempt in range(attempts):
-            attempt_trace: list[dict[str, Any]] = []
+            attempt_trace: list[dict[str, Any]] = (
+                _TurnSink(on_turn, {"sample_id": item["id"], "repeat": repeat,
+                                    "attempt": attempt, "attempts": attempts,
+                                    "max_turns": max_turns})
+                if on_turn is not None else [])
             ws = None
             try:
                 # Workspace construction is inside the try. It was outside, and it
@@ -222,7 +243,7 @@ def run_arbiter(
                     max_tokens=max_tokens,
                     trace_sink=attempt_trace,
                     ruled_out=ruled_out if carry_ruled_out else None,
-                    proposals=proposal_block(hits.get(item['id'], []), rare) if hits else "",
+                    proposals=render(hits.get(item['id'], []), rare) if hits else "",
                     predicates=predicates,
                 )
             except BuildUnavailable as exc:
@@ -322,6 +343,27 @@ def run_arbiter(
         json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8"
     )
     return summary
+
+
+def _safe_call(hook: Any, *args: Any) -> None:
+    if hook is None:
+        return
+    try:
+        hook(*args)
+    except Exception:  # noqa: BLE001 -- a progress display must never cost a sample
+        pass
+
+
+class _TurnSink(list):
+    """The agent's trace list, which also reports each turn as it is appended."""
+
+    def __init__(self, hook: Any, meta: dict[str, Any]) -> None:
+        super().__init__()
+        self._hook, self._meta = hook, meta
+
+    def append(self, entry: Any) -> None:  # noqa: D102
+        super().append(entry)
+        _safe_call(self._hook, {**self._meta, **entry})
 
 
 def _by_repeat(rows: list[dict[str, Any]]) -> dict[str, dict[str, str]]:

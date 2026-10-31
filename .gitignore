@@ -36,6 +36,12 @@ __pycache__/
 **/runs/*.ledger.jsonl
 **/runs/*.input.json
 **/runs/*.patches.jsonl
+# scripts/eval_launch.sh, eval_watch.sh and eval_requeue.py: run logs, the generated
+# tunnel loop, requeued rows and the results backups taken before a requeue.
+**/runs/*.log
+**/runs/.tunnel.sh
+**/runs/*.requeued.jsonl
+**/runs/*.bak.jsonl
 
 # Foundry build artefacts from running the probes and the local demo in-tree.
 arbiter/cache/
@@ -43,3 +49,7 @@ arbiter/out/
 # Per-job directories written by `python3 -m arbiter.gate --file` (run_arbiter output,
 # evidence workspaces, run.log).
 **/runs/gate/
+**/runs/gate-pr/
+**/runs/patchstats/
+**/runs/p7b/
+**/runs/p8/

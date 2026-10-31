@@ -4,4 +4,4 @@ ARBITER Gate  [from_results]  run_id=spark-test-1  models=arbiter-gpt:latest  LL
     reason: agent_concluded_no_attack
 
 exit code 0
-gate.json: /home/sam/innoserve/reports/step2a/gate_spark-test-1.json
+gate.json: ~/innoserve/reports/step2a/gate_spark-test-1.json

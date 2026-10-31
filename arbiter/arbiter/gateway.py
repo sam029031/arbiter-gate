@@ -160,6 +160,10 @@ class Gateway:
         self.timeout = timeout
         self.max_retries = max_retries
         self.strict_model = strict_model
+        # Optional progress hook (run_arbiter's on_request): called with the messages
+        # about to be sent, before every request. None by default; a hook that raises is
+        # ignored, so it can never change what is sent or whether it is.
+        self.on_request: Any = None
         self.usage = Usage()
         self._usage_lock = threading.Lock()
         self._ledger_path = ledger_path
@@ -209,6 +213,11 @@ class Gateway:
 
         body = json.dumps(payload).encode("utf-8")
         last_error: str = ""
+        if self.on_request is not None:
+            try:
+                self.on_request(messages, tag)
+            except Exception:  # noqa: BLE001
+                pass
 
         for attempt in range(self.max_retries):
             self.limiter.acquire()

@@ -1,0 +1,140 @@
+{
+ "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+ "version": "2.1.0",
+ "runs": [
+  {
+   "tool": {
+    "driver": {
+     "name": "ARBITER Gate",
+     "informationUri": "https://github.com/sam029031/arbiter-gate",
+     "semanticVersion": "0.1.0",
+     "rules": [
+      {
+       "id": "arbiter/proven/reentrancy",
+       "name": "ProvenExploit",
+       "shortDescription": {
+        "text": "已證實可攻擊：Reentrancy"
+       },
+       "fullDescription": {
+        "text": "攻擊程式已在 EVM 上執行，並滿足由 harness 持有的成功條件；這不是靜態推測。"
+       },
+       "help": {
+        "text": "下載回歸測試與修補（若有），審閱後套用並重新稽核。"
+       },
+       "defaultConfiguration": {
+        "level": "error"
+       },
+       "properties": {
+        "tags": [
+         "security",
+         "proven-exploit"
+        ],
+        "security-severity": "8.0"
+       }
+      }
+     ]
+    }
+   },
+   "originalUriBaseIds": {
+    "%SRCROOT%": {
+     "description": {
+      "text": "The repository (or upload) root the gate audited."
+     }
+    }
+   },
+   "invocations": [
+    {
+     "executionSuccessful": true,
+     "exitCode": 1
+    }
+   ],
+   "results": [
+    {
+     "ruleId": "arbiter/proven/reentrancy",
+     "level": "error",
+     "message": {
+      "text": "已證實可攻擊（擋部署）：Reentrancy in unstake() enables attacker to drain all ether。函式 unstake；以 victim_loss 在 EVM 上證實（攻擊證明 StakingVaultReentrancyVictimLossExploitPoc）。"
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "StakingVault.sol",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 20,
+         "endLine": 30
+        }
+       }
+      }
+     ],
+     "partialFingerprints": {
+      "arbiterFinding/v1": "50d79f2c169740abf65daffdb1bd9173eab4d19b0127ccfeee30a18684737c6d"
+     },
+     "properties": {
+      "verdict": "proven_exploitable",
+      "severity": "high",
+      "vulnerable_function": "unstake",
+      "predicate": "victim_loss",
+      "predicate_strict": true,
+      "poc_name": "StakingVaultReentrancyVictimLossExploitPoc",
+      "location_basis": "function_definition",
+      "abg_status": "measured",
+      "abg_wei": [
+       {
+        "env": 0,
+        "A": 1000000000000000000,
+        "B": 0,
+        "G": 1000000000000000000
+       },
+       {
+        "env": 1,
+        "A": 1000000000000000000,
+        "B": 0,
+        "G": 1000000000000000000
+       },
+       {
+        "env": 2,
+        "A": 1000000000000000000,
+        "B": 0,
+        "G": 1000000000000000000
+       },
+       {
+        "env": 3,
+        "A": 1000000000000000000,
+        "B": 0,
+        "G": 1000000000000000000
+       }
+      ],
+      "patch_status": "verified",
+      "regression_status": "available"
+     }
+    }
+   ],
+   "properties": {
+    "gate_schema": "arbiter-gate/0.1",
+    "run_id": "p6-cycle-1",
+    "models": [
+     "arbiter-gpt:latest"
+    ],
+    "generated_at": "2026-10-30T11:52:49+0800",
+    "coverage": [
+     {
+      "uri": "StakingVault.sol",
+      "verdict": "proven_exploitable",
+      "label": "已證實可攻擊（擋部署）",
+      "reason": "finding_submitted",
+      "static_analysis": {
+       "status": "ran",
+       "tool": "slither 0.11.6",
+       "reason": ""
+      }
+     }
+    ],
+    "unscanned": [],
+    "no_provable_attack_note": "未發現可證明攻擊（不等於安全）：不產生 alert；沒有 alert 不代表合約沒有漏洞。"
+   }
+  }
+ ]
+}

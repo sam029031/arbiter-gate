@@ -1,0 +1,24 @@
+== start 2026-10-30 14:20:09  (r3 running: yes)
+agent/tools diff lines vs innoserve-base: 0
+workspace.py:  1 file changed, 17 insertions(+), 2 deletions(-)
+== liveness_patch_probe   rc=0  10/10 as expected
+== patch_probe            rc=0  5/5 as expected
+== pr_gate_probe          rc=0  7/7 as expected
+== diffscan_probe         rc=0  13/13 as expected
+== reattack_probe         rc=0  5/5 as expected
+== demo_gate.sh --auto --no-smoke rc=0
+        0.0 s  第 4 段  收尾
+       12.6 s  合計（各段相加）
+       30.7 s  含暫停的總時間
+   host paths in demo_gate output: 0
+== sandbox_assertions rc=0
+  [OK  ] 1 network blocked          9/9 destinations blocked (<host>:443, <host>:53, github.com:443, host.docker.internal:11434, host <host>:40065/114
+  [OK  ] 2 PATH only                forge tests passed 2/2 (secrets absent, host .env unreadable though fs_permissions allowed /); `env` inside: ['PATH']; calle
+  [OK  ] 3 offline pragmas          12/12 builds offline (6 sources x auto/0.8.20); auto-detect used ['0.8.37']  (2.5s)
+  [OK  ] 4 onchain not imported     sandboxed gate (spark-test-2 replay, rc 1) + arbiter.web imported: onchain not imported 1  (9.3s)
+  [OK  ] 5 timeouts leave nothing   after SIGKILL of the caller, in-container sleep pids ['1', '13']; job end: container gone True, host docker-exec left none; 
+  [OK  ] 6 jobs isolated            4 job dirs distinct True; file run ids distinct True; containers 2 distinct; job A sees job B's dir: False; second job while
+  [SKIP] 7 model reachable outside  SKIPPED: the pre-registered eval (gptoss-v3-*) is running; rerun after it ends  (0.0s)
+6/7 passed, 1 skipped; sandbox containers left: none
+   leftover containers: 0
+== end 2026-10-30 14:21:45

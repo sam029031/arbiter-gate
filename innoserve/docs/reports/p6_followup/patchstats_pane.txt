@@ -1,0 +1,62 @@
+runs/patchstats/run.log: No such file or directory (os error 2)
+0 row(s) already done, 19 to do
+[13:21:50] 1/19 gptoss-v3-r1 V_reentrancy_unstake
+    -> accepted  checks={'0': 'pass', 'L': 'pass', '3': 'pass', '1': 'pass', '2'
+: 'pass', '4': 'not_applicable', '5': 'pass'} proposals=1 requests=5 132.13 s
+[13:24:02] 2/19 gptoss-v3-r1 V_missing_access_control_disburse
+    -> skipped predicate_not_patched: predicate 'eth_profit' is not patched yet
+checks={} proposals=None requests=0 0.0 s
+[13:24:02] 3/19 gptoss-v3-r1 V_unchecked_call_return_buyback
+    -> skipped predicate_not_patched: predicate 'eth_profit' is not patched yet
+checks={} proposals=None requests=0 0.0 s
+[13:24:02] 4/19 gptoss-v3-r1 S_unchecked_call_return_buyback
+    -> skipped predicate_not_patched: predicate 'eth_profit' is not patched yet
+checks={} proposals=None requests=0 0.0 s
+[13:24:02] 5/19 gptoss-v3-r1 V_delegatecall_unchecked_module
+    -> skipped predicate_not_patched: predicate 'eth_profit' is not patched yet
+checks={} proposals=None requests=0 0.0 s
+[13:24:02] 6/19 gptoss-v3-r1 S_missing_deadline_signed_order
+    -> skipped predicate_not_patched: predicate 'token_profit' is not patched ye
+t checks={} proposals=None requests=0 0.0 s
+[13:24:02] 7/19 gptoss-v3-r1 V_signature_replay_voucher
+    -> skipped predicate_not_patched: predicate 'eth_profit' is not patched yet
+checks={} proposals=None requests=0 0.0 s
+[13:24:02] 8/19 gptoss-v3-r1 V_ecrecover_zero_address_session
+    -> accepted  checks={'0': 'pass', 'L': 'pass', '3': 'pass', '1': 'pass', '2'
+: 'pass', '4': 'not_applicable', '5': 'pass'} proposals=1 requests=11 331.79 s
+[13:29:34] 9/19 gptoss-v3-r1 V_weak_randomness_flip_payout
+    -> skipped predicate_not_patched: predicate 'eth_profit' is not patched yet
+checks={} proposals=None requests=0 0.0 s
+[13:29:34] 10/19 gptoss-v3-r2 V_reentrancy_unstake
+    -> accepted  checks={'0': 'pass', 'L': 'pass', '3': 'pass', '1': 'pass', '2'
+: 'pass', '4': 'not_applicable', '5': 'pass'} proposals=1 requests=5 123.22 s
+[13:31:37] 11/19 gptoss-v3-r2 V_missing_access_control_disburse
+    -> skipped predicate_not_patched: predicate 'eth_profit' is not patched yet
+checks={} proposals=None requests=0 0.0 s
+[13:31:37] 12/19 gptoss-v3-r2 V_unchecked_call_return_buyback
+    -> skipped liveness_broken: 這一版的修補閘門沒有實作 liveness_broken 的檢查
+checks={} proposals=None requests=0 0.0 s
+[13:31:37] 13/19 gptoss-v3-r2 V_delegatecall_unchecked_module
+    -> skipped predicate_not_patched: predicate 'eth_profit' is not patched yet
+checks={} proposals=None requests=0 0.0 s
+[13:31:37] 14/19 gptoss-v3-r2 V_amm_spot_price_oracle
+    -> skipped predicate_not_patched: predicate 'token_profit' is not patched ye
+t checks={} proposals=None requests=0 0.0 s
+[13:31:37] 15/19 gptoss-v3-r2 V_signature_replay_voucher
+    -> skipped predicate_not_patched: predicate 'eth_profit' is not patched yet
+checks={} proposals=None requests=0 0.0 s
+[13:31:37] 16/19 gptoss-v3-r2 V_ecrecover_zero_address_session
+    -> accepted  checks={'0': 'pass', 'L': 'pass', '3': 'pass', '1': 'pass', '2'
+: 'pass', '4': 'not_applicable', '5': 'pass'} proposals=1 requests=6 180.72 s
+[13:34:38] 17/19 gptoss-v3-r2 V_commit_reveal_frontrun
+    -> skipped predicate_not_patched: predicate 'eth_profit' is not patched yet
+checks={} proposals=None requests=0 0.0 s
+[13:34:38] 18/19 gptoss-v3-r2 V_weak_randomness_flip_payout
+    -> skipped predicate_not_patched: predicate 'eth_profit' is not patched yet
+checks={} proposals=None requests=0 0.0 s
+[13:34:38] 19/19 gptoss-v3-r2 S_weak_randomness_flip_payout
+    -> skipped predicate_not_patched: predicate 'eth_profit' is not patched yet
+checks={} proposals=None requests=0 0.0 s
+all rows done
+EXIT=0
+

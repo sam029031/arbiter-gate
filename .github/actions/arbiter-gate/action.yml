@@ -1,0 +1,143 @@
+# ARBITER Gate as a composite action, for a self-hosted runner that has ARBITER installed.
+#
+# What it does on a pull_request event:
+#   1. a PR from a fork is refused before anything is checked out: "無法判定（稽核未完成）",
+#      exit 2 -- not a pass, and the comment says it is not a finding;
+#   2. otherwise the PR head is checked out (fetch-depth: 0) and scripts/gate_pr.sh runs
+#      the gate in PR mode: only .sol files whose functions the PR changed are audited,
+#      forge / Slither run in the per-job sandbox (--sandbox on), and a
+#      TestArbiterRegression already in the repository is re-run;
+#   3. the SARIF goes to code scanning, the regression test (if any) to the run's
+#      artifacts, and one PR comment is posted or updated, with suggestion blocks when a
+#      verified patch lands on lines of the PR's diff;
+#   4. the job ends with the gate's exit code: 1 blocks merging, 2 "did not run" (also
+#      not a pass), 0 passes (a static-tool hint passes too, as a SARIF warning).
+#
+# Nothing secret comes from GitHub. The runner host keeps a config file
+# (default $HOME/.config/arbiter/gate-runner.env, mode 600) with ARBITER_HOME (the
+# arbiter/ directory of an ARBITER checkout), ARBITER_DOTENV (the .env with the model
+# endpoint) and optionally ARBITER_GATE_BLOCK_PATTERN. The Actions log of a public
+# repository is public: the steps below print verdict labels and counts only, never the
+# endpoint, a key, or a path of the host.
+name: ARBITER Gate
+description: Audit the Solidity functions a pull request changed; block merging only on an exploit proven on the EVM.
+inputs:
+  github-token:
+    description: token for the PR comment and the SARIF upload (the workflow's own is enough)
+    default: ${{ github.token }}
+  runner-config:
+    description: config file on the runner host (empty = $HOME/.config/arbiter/gate-runner.env)
+    default: ""
+outputs:
+  exit-code:
+    description: 1 blocked, 2 not executed, 0 passed
+    value: ${{ steps.gate.outputs.rc }}
+runs:
+  using: composite
+  steps:
+    - name: Same-repository PRs only
+      id: who
+      shell: bash
+      env:
+        EVENT: ${{ github.event_name }}
+        HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        BASE_REPO: ${{ github.repository }}
+      run: |
+        if [ "$EVENT" != "pull_request" ]; then
+          echo "ARBITER Gate runs on pull_request events only (got $EVENT)."
+          echo "mode=refuse-event" >> "$GITHUB_OUTPUT"
+        elif [ -n "$HEAD_REPO" ] && [ "$HEAD_REPO" = "$BASE_REPO" ]; then
+          echo "mode=audit" >> "$GITHUB_OUTPUT"
+        else
+          echo "This PR comes from a fork: its code is not checked out or run on this runner."
+          echo "mode=fork" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Check out the PR head
+      if: steps.who.outputs.mode == 'audit'
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      env:
+        # checkout copies $HOME/.gitconfig and prints that path; the runner user's home
+        # is a path of this host, so this step gets an empty one under the job's temp dir
+        HOME: ${{ runner.temp }}/arbiter-gate-home
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
+        submodules: recursive
+        persist-credentials: false
+        path: arbiter-gate-pr
+
+    - name: ARBITER Gate
+      id: gate
+      if: steps.who.outputs.mode == 'audit' || steps.who.outputs.mode == 'fork'
+      shell: bash
+      env:
+        MODE: ${{ steps.who.outputs.mode }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        RUNNER_CONFIG: ${{ inputs.runner-config }}
+      run: |
+        set +e
+        cfg="${RUNNER_CONFIG:-$HOME/.config/arbiter/gate-runner.env}"
+        if [ ! -r "$cfg" ]; then
+          echo "::error::無法判定（稽核未完成）：runner 主機沒有 ARBITER Gate 的設定檔。這不是發現漏洞。"
+          echo "rc=2" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        set -a; . "$cfg"; set +a
+        bash "$ARBITER_HOME/scripts/gate_pr.sh" "$MODE" "$GITHUB_WORKSPACE/arbiter-gate-pr" \
+          "$BASE_SHA" "$HEAD_SHA" "$GITHUB_WORKSPACE/arbiter-gate-out" "$RUN_URL"
+        rc=$?
+        echo "rc=$rc" >> "$GITHUB_OUTPUT"
+        [ -s arbiter-gate-out/report.sarif ] && echo "sarif=yes" >> "$GITHUB_OUTPUT"
+        [ -d arbiter-gate-out/regression ] && echo "regression=yes" >> "$GITHUB_OUTPUT"
+        exit 0
+
+    - name: Upload SARIF to code scanning
+      if: steps.who.outputs.mode == 'audit' && steps.gate.outputs.sarif == 'yes'
+      continue-on-error: true
+      uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4.39.1
+      with:
+        sarif_file: arbiter-gate-out/report.sarif
+        category: arbiter-gate
+        checkout_path: ${{ github.workspace }}/arbiter-gate-pr
+        token: ${{ inputs.github-token }}
+
+    - name: Upload the regression test
+      if: steps.gate.outputs.regression == 'yes'
+      continue-on-error: true
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+      with:
+        name: arbiter-gate-regression
+        path: arbiter-gate-out/regression
+        if-no-files-found: ignore
+
+    - name: Post the PR comment
+      if: steps.gate.outputs.rc != ''
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        RUNNER_CONFIG: ${{ inputs.runner-config }}
+      run: |
+        cfg="${RUNNER_CONFIG:-$HOME/.config/arbiter/gate-runner.env}"
+        [ -r "$cfg" ] || { echo "no runner config; comment not posted"; exit 0; }
+        set -a; . "$cfg"; set +a
+        python3 "$ARBITER_HOME/scripts/gate_pr_publish.py" --out-dir arbiter-gate-out \
+          --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$HEAD_SHA" || true
+
+    - name: Result
+      if: always()
+      shell: bash
+      env:
+        RC: ${{ steps.gate.outputs.rc }}
+        MODE: ${{ steps.who.outputs.mode }}
+      run: |
+        rm -rf arbiter-gate-out arbiter-gate-pr
+        case "${RC:-2}" in
+          0) echo "ARBITER Gate: 放行（exit 0）。沒有找到可證明的攻擊不等於安全。"; exit 0 ;;
+          1) echo "::error::ARBITER Gate: 擋合併（exit 1）。見 PR 留言與 Security 分頁。"; exit 1 ;;
+          *) echo "::error::ARBITER Gate: 無法判定（稽核未完成，exit 2）。這不是發現漏洞，也不算通過。"; exit 2 ;;
+        esac

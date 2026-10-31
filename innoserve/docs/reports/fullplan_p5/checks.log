@@ -1,0 +1,46 @@
+== start 2026-10-30 10:56:11
+== core files vs innoserve-base
+agent/tools diff lines: 0
+ 1 file changed, 17 insertions(+), 2 deletions(-)
+== 8 probes
+victim         rc=0  4/4 as expected
+forgery        rc=0  6/6 as expected
+halt           rc=0  3/3 as expected
+drain          rc=0  2/2 as expected
+sweep          rc=0  2/2 as expected
+latebinding    rc=0  4/4 as expected
+setup_forgery  rc=0  3/3 as expected
+gain           rc=0  2/2 as expected
+8/8 exit 0
+== patch_probe        rc=0  5/5 as expected
+== regression_probe   rc=0  6/6 as expected
+== mcp_probe          rc=0  3/3 as expected (no LLM request: the server runs forge only)
+== diffscan_probe     rc=0  13/13 as expected
+== pr_gate_probe      rc=0  7/7 as expected
+== action_fork_probe  rc=0  22/22 as expected
+== pr_gate_probe --sandbox rc=0  7/7 as expected
+== live_attack rc=0    PROVEN on a live chain: value left the contract, the attacker holds it,
+== live_attack --patched rc=0    NOT PROVEN. The transcript above is what actually happened.
+== sandbox_assertions rc=2  python3: can't open file '~/innoserve/arbiter-audit/arbiter/service/tests/sandbox_assertions.py': [Errno 2] No such file or directory
+   leftover containers: 0
+== gate spark-test-2 rc=1
+  error results 1 == proven findings in gate.json 1: yes
+== demo_gate.sh --auto rc=0
+        5.9 s  第 3 段  真鏈：同一個合約，真的交易
+        0.0 s  第 4 段  收尾
+       25.3 s  合計（各段相加）
+       43.4 s  含暫停的總時間
+   grep host paths in demo_gate output: 0
+   ledger lines 40 -> 40
+== end 2026-10-30 10:57:29
+== sandbox_assertions (rerun, correct path) rc=0
+  [OK  ] 1 network blocked          9/9 destinations blocked (<host>:443, <host>:53, github.com:443, host.docker.internal:11434, host <host>:35695/11434/8765, container 127.0.0.1); fork cheatcode failed: True; host listener reachable from the host itself (control ok)  (0.8s)
+  [OK  ] 2 PATH only                forge tests passed 2/2 (secrets absent, host .env unreadable though fs_permissions allowed /); `env` inside: ['PATH']; caller held 4 fake keys  (0.8s)
+  [OK  ] 3 offline pragmas          12/12 builds offline (6 sources x auto/0.8.20); auto-detect used ['0.8.37']  (2.4s)
+  [OK  ] 4 onchain not imported     sandboxed gate (spark-test-2 replay, rc 1) + arbiter.web imported: onchain not imported 1  (9.2s)
+  [OK  ] 5 timeouts leave nothing   after SIGKILL of the caller, in-container sleep pids ['1', '14']; job end: container gone True, host docker-exec left none; orphaned container (job_max 4 s) gone by itself after 9 s: True; web job over its 20 s limit (20 s): verdict not_executed, containers left none  (32.4s)
+  [OK  ] 6 jobs isolated            4 job dirs distinct True; file run ids distinct True; containers 2 distinct; job A sees job B's dir: False; second job while one runs: blocked (another sandbox job is running)  (2.7s)
+  [OK  ] 7 model reachable outside  api_smoke from the host with the sandbox environment (forge -> service/bin): rc 0, ['PASS: gateway at http://localhost:11434/v1 replied AIS3_OK']  (2.4s)
+
+7/7 passed, 0 skipped; sandbox containers left: none
+   leftover containers: 0

@@ -16,7 +16,7 @@
  "files": [
   {
    "id": "examples::StakingVault",
-   "path": "/home/sam/innoserve/arbiter-audit/arbiter/examples/StakingVault.sol",
+   "path": "~/innoserve/arbiter-audit/arbiter/examples/StakingVault.sol",
    "verdict": "no_provable_attack",
    "label": "未發現可證明攻擊（不等於安全）",
    "reason": "agent_concluded_no_attack",

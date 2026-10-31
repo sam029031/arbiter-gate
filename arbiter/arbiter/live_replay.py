@@ -397,6 +397,9 @@ def run_world(chain: LiveChain, proj: Path, with_attack: bool,
         after = chain.balance(factory) + chain.balance(chain.call(
             factory, "atk()(address)").strip())
         atk_gain = max(0, after - before)
+    # The contract under audit right after the attack and before the victim exits: the
+    # synthetic harness's tgtPre / tgtPost bracket the attack the same way.
+    tgt_post_attack = chain.balance(target)
 
     exit_step = chain.send(victim.key, world, "exit()")
     steps.append(exit_step)
@@ -413,6 +416,8 @@ def run_world(chain: LiveChain, proj: Path, with_attack: bool,
         "target_drained": max(0, tgt_pre - chain.balance(target)),
         "target_held_end": chain.balance(target),
         "target_held_mid": tgt_pre,
+        "target_held_after_attack": tgt_post_attack,
+        "attack_drained": max(0, tgt_pre - tgt_post_attack),
         "attacker_gain": atk_gain,
         "exit_ok": exit_step.ok,
         "steps": [vars(s) for s in steps],
@@ -445,8 +450,15 @@ def replay(rep: Replay, root: Path, port: int) -> dict[str, Any]:
 
     clean, attacked = worlds
     shortfall = max(0, clean["recovered"] - attacked["recovered"])
-    drained = attacked.get("target_drained", 0) - clean.get("target_drained", 0)
-    target_held_rose = attacked.get("target_held_end", 0) > attacked.get("target_held_mid", 0)
+    # What the attack itself took out of the contract under audit, on the attacked chain
+    # (user decision D20, 10/30). This used to be the two chains' outflow to the end,
+    # victim's exit included, subtracted -- which cancels exactly when the attacker takes
+    # what the victim would have withdrawn: shortfall 6 ether, attacker_gain 6 ether,
+    # the vault emptied by the attack, and "nothing left the contract". Kept below as a
+    # diagnostic only.
+    drained = attacked.get("attack_drained", 0)
+    target_held_rose = (attacked.get("target_held_after_attack", 0)
+                        > attacked.get("target_held_mid", 0))
     out.update({
         "recovered_clean": clean["recovered"],
         "recovered_attacked": attacked["recovered"],
@@ -454,6 +466,8 @@ def replay(rep: Replay, root: Path, port: int) -> dict[str, Any]:
         "shortfall": shortfall,
         "extracted_from_contract": max(0, drained),
         "target_held_rose": target_held_rose,
+        "drained_vs_clean": max(0, attacked.get("target_drained", 0)
+                                - clean.get("target_drained", 0)),
         # The same predicate the harness uses, computed from balances a node reported:
         # the victim got less back because the attack happened, and the attacker is
         # holding at least what the victim lost.

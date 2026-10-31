@@ -106,3 +106,72 @@ def proposal_block(
         "code, say so with conclude_safe -- following a bad suggestion into a finding "
         "you cannot prove is the one outcome worse than missing the bug."
     )
+
+
+# -- Slither as the proposal source (plan Step 4), OFF by default ------------------------
+#
+# Three gaps had to close before Slither could feed this queue, and all three are closed
+# here without touching the Bastet path above:
+#   1. format: Slither's JSON becomes jobs.jsonl rows (`slither_jobs`), one per check,
+#      with an n_findings 0 row for every corpus check that did not fire, so `load_hits`
+#      and the denominators see the sample even when nothing fired;
+#   2. wording: `proposal_block` describes Bastet ("true-negative rate is zero"), which is
+#      false of Slither; `slither_proposal_block` states Slither's own measured numbers;
+#   3. rarity: on a single contract `rarity()` divides by 1 and every check reads 100%, so
+#      `slither_rarity` uses the 40-contract reference corpus (runs/slither.json).
+# Whether it should ever be on is the pre-registered A/B's call (plan 9.3), and that A/B
+# has not run, so the gate only uses it behind --slither-proposals.
+
+SLITHER_EXCLUDED_IMPACTS = ("Informational", "Optimization")
+
+
+def _slither_counts(findings: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
+    for f in findings:
+        if f.get("impact") not in SLITHER_EXCLUDED_IMPACTS and f.get("check"):
+            counts[f["check"]] += 1
+    return counts
+
+
+def slither_rarity(corpus_path: Path) -> dict[str, float]:
+    """check -> share of the reference corpus's contracts it fires on (Informational and
+    Optimization excluded: `solc-version` alone fires on all 40 v3 contracts)."""
+    rows = json.loads(corpus_path.read_text(encoding="utf-8")).get("rows") or []
+    fired_on: dict[str, int] = defaultdict(int)
+    for r in rows:
+        for check in _slither_counts(r.get("findings") or []):
+            fired_on[check] += 1
+    n = len(rows) or 1
+    return {c: k / n for c, k in fired_on.items()}
+
+
+def slither_jobs(sample_id: str, findings: list[dict],
+                 corpus_checks: list[str] | None = None) -> list[dict]:
+    """jobs.jsonl rows for one audited item (`sample` must be the run's item id)."""
+    counts = _slither_counts(findings)
+    checks = sorted(set(counts) | set(corpus_checks or []))
+    return [{"sample": sample_id, "detector": c, "n_findings": counts.get(c, 0),
+             "source": "slither"} for c in checks] or [
+        {"sample": sample_id, "detector": "slither:none", "n_findings": 0, "source": "slither"}]
+
+
+def slither_proposal_block(hits: list[str], rare: dict[str, float], limit: int = 14) -> str:
+    """The queue text for Slither hits, with Slither's own measured reliability."""
+    if not hits:
+        return ""
+    ordered = sorted(hits, key=lambda d: (rare.get(d, 1.0), d))[:limit]
+    lines = "\n".join(
+        f"  - {d.replace('-', ' ')}  (fires on {rare.get(d, 1.0):.0%} of a 40-contract "
+        "reference set)" for d in ordered)
+    return (
+        "\n\nSlither, a static analyser, was run over this contract first. It is a pattern "
+        "matcher, not evidence: on a reference set of 20 vulnerable contracts and their 20 "
+        "patched twins it flagged half of the patched ones at medium severity "
+        "(specificity 0.50), so most of what it says about any one contract is noise.\n\n"
+        "It is useful only for naming classes you might not otherwise consider. These are "
+        "the checks it raised here, rarest first:\n\n"
+        f"{lines}\n\n"
+        "Treat them as hypotheses to test and discard, not as findings. Work through the "
+        "plausible ones with run_exploit; the harness refuses anything you cannot "
+        "demonstrate. If none survives contact with the code, say so with conclude_safe."
+    )

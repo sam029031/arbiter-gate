@@ -3,7 +3,7 @@
  "generated_at": "2026-10-28T19:33:10+0800",
  "input": {
   "mode": "file",
-  "file": "/home/sam/innoserve/arbiter-audit/arbiter/examples/StakingVault.sol",
+  "file": "~/innoserve/arbiter-audit/arbiter/examples/StakingVault.sol",
   "run_id": "modetrial-repo-2",
   "workspace_mode": "repo",
   "llm_requests_this_invocation": 4,

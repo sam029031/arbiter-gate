@@ -12,7 +12,7 @@
     ok  unstake()                      tx=0x58b56b8b8f2078cc03ad570e13f10d4b1b5aca62556e5cba8fcfe1548b5037c3  gas=33,918
     vault 7 ETH -> 7 ETH after attack step -> 5 ETH after victim exit
 
-  target: patched (/home/sam/innoserve/arbiter-audit/arbiter/runs/spark-test-2.patches.jsonl, arbiter-gpt:latest, 6 lines)
+  target: patched (~/innoserve/arbiter-audit/arbiter/runs/spark-test-2.patches.jsonl, arbiter-gpt:latest, 6 lines)
   A  victim recovered, control chain          2 ETH
   B  victim recovered, attack chain           2 ETH   (paid in 2 ETH)
   G  attacker contract gain                   0 ETH   (net incl. gas 0 ETH)
@@ -20,4 +20,4 @@
 
   NOT PROVEN. The transcript above is what actually happened.
 
-  transcript: /home/sam/innoserve/reports/live_attack_stakingvault/patched-spark-test-2-1.json
+  transcript: ~/innoserve/reports/live_attack_stakingvault/patched-spark-test-2-1.json

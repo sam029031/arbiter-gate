@@ -1,0 +1,313 @@
+ARBITER Gate	Set up job	﻿2026-10-30T02:41:43.9759781Z Current runner version: '2.338.2'
+ARBITER Gate	Set up job	2026-10-30T02:41:43.9769112Z Runner name: 'arbiter-gate-wsl'
+ARBITER Gate	Set up job	2026-10-30T02:41:43.9769891Z Runner group name: 'Default'
+ARBITER Gate	Set up job	2026-10-30T02:41:43.9770719Z Machine name: 'BACON'
+ARBITER Gate	Set up job	2026-10-30T02:41:43.9773543Z ##[group]GITHUB_TOKEN Permissions
+ARBITER Gate	Set up job	2026-10-30T02:41:43.9776328Z Actions: read
+ARBITER Gate	Set up job	2026-10-30T02:41:43.9776879Z Contents: read
+ARBITER Gate	Set up job	2026-10-30T02:41:43.9777418Z Issues: write
+ARBITER Gate	Set up job	2026-10-30T02:41:43.9777898Z Metadata: read
+ARBITER Gate	Set up job	2026-10-30T02:41:43.9778455Z PullRequests: write
+ARBITER Gate	Set up job	2026-10-30T02:41:43.9778985Z SecurityEvents: write
+ARBITER Gate	Set up job	2026-10-30T02:41:43.9779495Z ##[endgroup]
+ARBITER Gate	Set up job	2026-10-30T02:41:43.9834940Z Secret source: Actions
+ARBITER Gate	Set up job	2026-10-30T02:41:43.9836032Z Cache mode: write
+ARBITER Gate	Set up job	2026-10-30T02:41:43.9836594Z Prepare workflow directory
+ARBITER Gate	Set up job	2026-10-30T02:41:44.0409259Z Prepare all required actions
+ARBITER Gate	Set up job	2026-10-30T02:41:44.0464478Z Getting action download info
+ARBITER Gate	Set up job	2026-10-30T02:41:44.8331173Z Download action repository 'sam029031/arbiter-gate-demo@main' (SHA:87d1b222c85c9e33339b603d9a8b4bdd304d141e)
+ARBITER Gate	Set up job	2026-10-30T02:41:45.3409308Z Getting action download info
+ARBITER Gate	Set up job	2026-10-30T02:41:45.6372835Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+ARBITER Gate	Set up job	2026-10-30T02:41:46.3763060Z Download action repository 'github/codeql-action@9b3254085494b55a0f7c4c2b3d2d52cc712ce370' (SHA:9b3254085494b55a0f7c4c2b3d2d52cc712ce370)
+ARBITER Gate	Set up job	2026-10-30T02:41:47.2951568Z Download action repository 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' (SHA:cf430e030ddbb5b0abf93d22962f4752f3646cd9)
+ARBITER Gate	Set up job	2026-10-30T02:41:48.4449740Z Complete job name: ARBITER Gate
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	﻿2026-10-30T02:41:48.5361141Z ##[group]Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5361918Z with:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5364945Z   github-token: ***
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5365358Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5451009Z ##[start-action display=Same-repository PRs only;id=__sam029031_arbiter-gate-demo.who]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5510170Z ##[group]Run if [ "$EVENT" != "pull_request" ]; then
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5510733Z [36;1mif [ "$EVENT" != "pull_request" ]; then[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5511158Z [36;1m  echo "ARBITER Gate runs on pull_request events only (got $EVENT)."[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5511621Z [36;1m  echo "mode=refuse-event" >> "$GITHUB_OUTPUT"[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5512038Z [36;1melif [ -n "$HEAD_REPO" ] && [ "$HEAD_REPO" = "$BASE_REPO" ]; then[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5512467Z [36;1m  echo "mode=audit" >> "$GITHUB_OUTPUT"[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5512764Z [36;1melse[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5513130Z [36;1m  echo "This PR comes from a fork: its code is not checked out or run on this runner."[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5513659Z [36;1m  echo "mode=fork" >> "$GITHUB_OUTPUT"[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5513955Z [36;1mfi[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5553397Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5553845Z env:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5554037Z   EVENT: pull_request
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5554277Z   HEAD_REPO: sam029031/arbiter-gate-demo
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5554581Z   BASE_REPO: sam029031/arbiter-gate-demo
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5554873Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5758156Z ##[end-action id=__sam029031_arbiter-gate-demo.who;outcome=success;conclusion=success;duration_ms=30]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5762630Z ##[start-action display=Check out the PR head;id=__sam029031_arbiter-gate-demo.__actions_checkout]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5891344Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5891840Z with:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5892104Z   ref: 46e2d15c316bdd27dd121dc042a36b8ba1f823ee
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5892405Z   fetch-depth: 0
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5892638Z   submodules: recursive
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5892877Z   persist-credentials: false
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5893131Z   path: arbiter-gate-pr
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5893378Z   repository: sam029031/arbiter-gate-demo
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5896671Z   token: ***
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5896909Z   ssh-strict: true
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5897262Z   ssh-user: git
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5897459Z   clean: true
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5897996Z   sparse-checkout-cone-mode: true
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5898271Z   fetch-tags: false
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5898490Z   show-progress: true
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5898700Z   lfs: false
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5898898Z   set-safe-directory: true
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5899149Z   allow-unsafe-pr-checkout: false
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.5899406Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.6969009Z Syncing repository: sam029031/arbiter-gate-demo
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.6970867Z ##[group]Getting Git version info
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.6971541Z Working directory is '/opt/arbiter-gate-runner/_work/arbiter-gate-demo/arbiter-gate-demo/arbiter-gate-pr'
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.7860013Z [command]/usr/bin/git version
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.7912177Z git version 2.53.0
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.7932929Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.7943992Z Copying '~/.gitconfig' to '/opt/arbiter-gate-runner/_work/_temp/1e847aad-38f1-49bf-9900-1df4d46ac79f/.gitconfig'
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.7955869Z Temporarily overriding HOME='/opt/arbiter-gate-runner/_work/_temp/1e847aad-38f1-49bf-9900-1df4d46ac79f' before making global git config changes
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.7957159Z Adding repository directory to the temporary git global config as a safe directory
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.7960282Z [command]/usr/bin/git config --global --add safe.directory /opt/arbiter-gate-runner/_work/arbiter-gate-demo/arbiter-gate-demo/arbiter-gate-pr
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8000458Z ##[group]Determining repository object format
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8001819Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8002462Z ##[group]Initializing the repository
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8008207Z [command]/usr/bin/git init /opt/arbiter-gate-runner/_work/arbiter-gate-demo/arbiter-gate-demo/arbiter-gate-pr
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8067967Z hint: Using 'master' as the name for the initial branch. This default branch name
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8069182Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8070199Z hint: to use in all of your new repositories, which will suppress this warning,
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8070708Z hint: call:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8070911Z hint:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8071224Z hint: 	git config --global init.defaultBranch <name>
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8071566Z hint:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8071906Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8072504Z hint: 'development'. The just-created branch can be renamed via this command:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8073037Z hint:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8073265Z hint: 	git branch -m <name>
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8073517Z hint:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8073901Z hint: Disable this message with "git config set advice.defaultBranchName false"
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8074774Z Initialized empty Git repository in /opt/arbiter-gate-runner/_work/arbiter-gate-demo/arbiter-gate-demo/arbiter-gate-pr/.git/
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8084841Z [command]/usr/bin/git remote add origin https://github.com/sam029031/arbiter-gate-demo
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8136851Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8137478Z ##[group]Disabling automatic garbage collection
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8141771Z [command]/usr/bin/git config --local gc.auto 0
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8188831Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8189773Z ##[group]Setting up auth
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8190330Z Removing SSH command configuration
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8197153Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8260284Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8573533Z Removing HTTP extra header
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8578664Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8625811Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8952885Z Removing includeIf entries pointing to credentials config files
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8960028Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.8999791Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.9309265Z [command]/usr/bin/git config --file /opt/arbiter-gate-runner/_work/_temp/git-credentials-384556dd-85d5-4137-a955-13694471dda9.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.9368850Z [command]/usr/bin/git config --local includeIf.gitdir:/opt/arbiter-gate-runner/_work/arbiter-gate-demo/arbiter-gate-demo/arbiter-gate-pr/.git.path /opt/arbiter-gate-runner/_work/_temp/git-credentials-384556dd-85d5-4137-a955-13694471dda9.config
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.9412285Z [command]/usr/bin/git config --local includeIf.gitdir:/opt/arbiter-gate-runner/_work/arbiter-gate-demo/arbiter-gate-demo/arbiter-gate-pr/.git/worktrees/*.path /opt/arbiter-gate-runner/_work/_temp/git-credentials-384556dd-85d5-4137-a955-13694471dda9.config
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.9450582Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/arbiter-gate-pr/.git.path /github/runner_temp/git-credentials-384556dd-85d5-4137-a955-13694471dda9.config
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.9485004Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/arbiter-gate-pr/.git/worktrees/*.path /github/runner_temp/git-credentials-384556dd-85d5-4137-a955-13694471dda9.config
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.9519045Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.9519541Z ##[group]Fetching the repository
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:48.9528166Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7158831Z From https://github.com/sam029031/arbiter-gate-demo
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7159820Z  * [new branch]      demo/remove-position-view -> origin/demo/remove-position-view
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7160585Z  * [new branch]      demo/unstake-pay-first -> origin/demo/unstake-pay-first
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7161207Z  * [new branch]      demo/version-constant  -> origin/demo/version-constant
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7161689Z  * [new branch]      main                   -> origin/main
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7212447Z [command]/usr/bin/git rev-parse --verify --quiet 46e2d15c316bdd27dd121dc042a36b8ba1f823ee^{object}
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7240757Z 46e2d15c316bdd27dd121dc042a36b8ba1f823ee
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7263814Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7264679Z ##[group]Determining the checkout info
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7265204Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7265537Z [command]/usr/bin/git sparse-checkout disable
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7691726Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7733784Z ##[group]Checking out the ref
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7740841Z [command]/usr/bin/git checkout --progress --force 46e2d15c316bdd27dd121dc042a36b8ba1f823ee
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7815586Z Note: switching to '46e2d15c316bdd27dd121dc042a36b8ba1f823ee'.
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7816411Z 
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7816673Z You are in 'detached HEAD' state. You can look around, make experimental
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7817241Z changes and commit them, and you can discard any commits you make in this
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7817798Z state without impacting any branches by switching back to a branch.
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7818121Z 
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7818338Z If you want to create a new branch to retain commits you create, you may
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7818907Z do so (now or later) by using -c with the switch command. Example:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7819227Z 
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7819349Z   git switch -c <new-branch-name>
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7819581Z 
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7819703Z Or undo this operation with:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7819906Z 
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7820067Z   git switch -
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7820298Z 
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7820706Z Turn off this advice by setting config variable advice.detachedHead to false
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7821396Z 
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7822162Z HEAD is now at 46e2d15 remove positionOf(): stakeOf and stakedAt are already public
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7823386Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7823813Z ##[group]Setting up auth for fetching submodules
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7829741Z [command]/usr/bin/git config --file /opt/arbiter-gate-runner/_work/_temp/git-credentials-384556dd-85d5-4137-a955-13694471dda9.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7879848Z [command]/usr/bin/git config --global include.path /opt/arbiter-gate-runner/_work/_temp/git-credentials-384556dd-85d5-4137-a955-13694471dda9.config
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7921357Z [command]/usr/bin/git config --global --unset-all url.https://github.com/.insteadOf
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.7958933Z [command]/usr/bin/git config --global --add url.https://github.com/.insteadOf git@github.com:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.8002648Z [command]/usr/bin/git config --global --add url.https://github.com/.insteadOf org-186788518@github.com:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.8056306Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.8056779Z ##[group]Fetching submodules
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.8062088Z [command]/usr/bin/git submodule sync --recursive
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.8398137Z [command]/usr/bin/git -c protocol.version=2 submodule update --init --force --recursive
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.8760649Z [command]/usr/bin/git submodule foreach --recursive git config --local gc.auto 0
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9095230Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9138122Z [command]/usr/bin/git log -1 --format=%H
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9166641Z 46e2d15c316bdd27dd121dc042a36b8ba1f823ee
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9177412Z ##[group]Removing auth
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9178148Z Removing SSH command configuration
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9184181Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9222008Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9515964Z Removing HTTP extra header
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9522681Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9578870Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9925545Z Removing includeIf entries pointing to credentials config files
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9926435Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9958708Z includeif.gitdir:/opt/arbiter-gate-runner/_work/arbiter-gate-demo/arbiter-gate-demo/arbiter-gate-pr/.git.path
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9960263Z includeif.gitdir:/opt/arbiter-gate-runner/_work/arbiter-gate-demo/arbiter-gate-demo/arbiter-gate-pr/.git/worktrees/*.path
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9961194Z includeif.gitdir:/github/workspace/arbiter-gate-pr/.git.path
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9961764Z includeif.gitdir:/github/workspace/arbiter-gate-pr/.git/worktrees/*.path
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9972010Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/opt/arbiter-gate-runner/_work/arbiter-gate-demo/arbiter-gate-demo/arbiter-gate-pr/.git.path
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:49.9998781Z /opt/arbiter-gate-runner/_work/_temp/git-credentials-384556dd-85d5-4137-a955-13694471dda9.config
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0009185Z [command]/usr/bin/git config --local --unset includeif.gitdir:/opt/arbiter-gate-runner/_work/arbiter-gate-demo/arbiter-gate-demo/arbiter-gate-pr/.git.path \/opt\/arbiter\-gate\-runner\/_work\/_temp\/git\-credentials\-384556dd\-85d5\-4137\-a955\-13694471dda9\.config
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0047636Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/opt/arbiter-gate-runner/_work/arbiter-gate-demo/arbiter-gate-demo/arbiter-gate-pr/.git/worktrees/*.path
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0077496Z /opt/arbiter-gate-runner/_work/_temp/git-credentials-384556dd-85d5-4137-a955-13694471dda9.config
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0098573Z [command]/usr/bin/git config --local --unset includeif.gitdir:/opt/arbiter-gate-runner/_work/arbiter-gate-demo/arbiter-gate-demo/arbiter-gate-pr/.git/worktrees/*.path \/opt\/arbiter\-gate\-runner\/_work\/_temp\/git\-credentials\-384556dd\-85d5\-4137\-a955\-13694471dda9\.config
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0168875Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/arbiter-gate-pr/.git.path
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0200930Z /github/runner_temp/git-credentials-384556dd-85d5-4137-a955-13694471dda9.config
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0211783Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/arbiter-gate-pr/.git.path \/github\/runner_temp\/git\-credentials\-384556dd\-85d5\-4137\-a955\-13694471dda9\.config
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0254779Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/arbiter-gate-pr/.git/worktrees/*.path
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0288593Z /github/runner_temp/git-credentials-384556dd-85d5-4137-a955-13694471dda9.config
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0302267Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/arbiter-gate-pr/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-384556dd\-85d5\-4137\-a955\-13694471dda9\.config
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0344701Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0658952Z Removing credentials config '/opt/arbiter-gate-runner/_work/_temp/git-credentials-384556dd-85d5-4137-a955-13694471dda9.config'
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0672473Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0776490Z ##[end-action id=__sam029031_arbiter-gate-demo.__actions_checkout;outcome=success;conclusion=success;duration_ms=1501]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0805333Z ##[start-action display=ARBITER Gate;id=__sam029031_arbiter-gate-demo.gate]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0835534Z ##[group]Run set +e
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0835830Z [36;1mset +e[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0836135Z [36;1mcfg="${RUNNER_CONFIG:-$HOME/.config/arbiter/gate-runner.env}"[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0836544Z [36;1mif [ ! -r "$cfg" ]; then[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0836914Z [36;1m  echo "::error::無法判定（稽核未完成）：runner 主機沒有 ARBITER Gate 的設定檔。這不是發現漏洞。"[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0837319Z [36;1m  echo "rc=2" >> "$GITHUB_OUTPUT"[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0837595Z [36;1m  exit 0[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0837790Z [36;1mfi[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0837988Z [36;1mset -a; . "$cfg"; set +a[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0838431Z [36;1mbash "$ARBITER_HOME/scripts/gate_pr.sh" "$MODE" "$GITHUB_WORKSPACE/arbiter-gate-pr" \[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0839031Z [36;1m  "$BASE_SHA" "$HEAD_SHA" "$GITHUB_WORKSPACE/arbiter-gate-out" "$RUN_URL"[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0839438Z [36;1mrc=$?[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0839656Z [36;1mecho "rc=$rc" >> "$GITHUB_OUTPUT"[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0840082Z [36;1m[ -s arbiter-gate-out/report.sarif ] && echo "sarif=yes" >> "$GITHUB_OUTPUT"[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0840672Z [36;1m[ -d arbiter-gate-out/regression ] && echo "regression=yes" >> "$GITHUB_OUTPUT"[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0841114Z [36;1mexit 0[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0873970Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0874352Z env:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0874565Z   MODE: audit
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0874806Z   BASE_SHA: 87d1b222c85c9e33339b603d9a8b4bdd304d141e
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0875158Z   HEAD_SHA: 46e2d15c316bdd27dd121dc042a36b8ba1f823ee
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0875619Z   RUN_URL: https://github.com/sam029031/arbiter-gate-demo/actions/runs/40993168563
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0876044Z   RUNNER_CONFIG: 
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:50.0876246Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6666334Z ARBITER Gate exit code 0
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6666949Z   touched functions: 0, uncovered: 1, skipped: 0
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6667307Z   model requests: 0, sandbox: on
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6702451Z rc=0
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6743025Z ##[end-action id=__sam029031_arbiter-gate-demo.gate;outcome=success;conclusion=success;duration_ms=1593]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6745945Z ##[start-action display=Upload SARIF to code scanning;id=__sam029031_arbiter-gate-demo.__github_codeql-action]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6815600Z ##[group]Run github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6816069Z with:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6816283Z   sarif_file: arbiter-gate-out/report.sarif
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6816758Z   category: arbiter-gate
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6817379Z   checkout_path: /opt/arbiter-gate-runner/_work/arbiter-gate-demo/arbiter-gate-demo/arbiter-gate-pr
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6820734Z   token: ***
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6820938Z   matrix: null
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6821149Z   wait-for-processing: true
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:51.6821406Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:52.0127873Z Job run UUID is 28fb3cec-bb1e-49cb-ab7a-3ecd8cba753b.
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:52.1674051Z git call failed. Continuing with commit SHA from user input or environment. Error: The checkout path provided to the action does not appear to be a git repository.
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:53.4083874Z Post-processing sarif files: ["arbiter-gate-out/report.sarif"]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:53.4090190Z Validating arbiter-gate-out/report.sarif
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:53.4199525Z Adding fingerprints to SARIF file. See https://docs.github.com/en/code-security/reference/code-scanning/sarif-support-for-code-scanning#data-for-preventing-duplicated-alerts for more information.
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:53.4201712Z ##[group]Uploading code scanning results
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:53.7713096Z git call failed. Continuing with commit SHA from user input or environment. Error: fatal: ambiguous argument 'refs/remotes/pull/2/merge': unknown revision or path not in the working tree.
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:53.7714826Z Use '--' to separate paths from revisions, like this:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:53.7715767Z 'git <command> [<revision>...] -- [<file>...]'
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:53.7716002Z 
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:53.8719932Z git call failed. Will calculate the base branch SHA on the server. Error: fatal: bad object 6e73d0583533b1e41755fb9fdb9fa9b7afa8a57d
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:53.8721164Z 
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:53.8728781Z Uploading results
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:54.6645255Z Successfully uploaded results
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:54.6646384Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:41:54.6652817Z ##[group]Waiting for processing to finish
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.0801512Z Analysis upload status is complete.
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.0802400Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.1822595Z git call failed. Continuing with commit SHA from user input or environment. Error: The checkout path provided to the action does not appear to be a git repository.
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.6934797Z ##[end-action id=__sam029031_arbiter-gate-demo.__github_codeql-action;outcome=success;conclusion=success;duration_ms=9018]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.6937562Z ##[start-action display=Upload the regression test;id=__sam029031_arbiter-gate-demo.__actions_upload-artifact]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.6954327Z ##[end-action id=__sam029031_arbiter-gate-demo.__actions_upload-artifact;outcome=skipped;conclusion=skipped;duration_ms=0]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.6959379Z ##[start-action display=Post the PR comment;id=__sam029031_arbiter-gate-demo.__run]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.6996177Z ##[group]Run cfg="${RUNNER_CONFIG:-$HOME/.config/arbiter/gate-runner.env}"
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.6996732Z [36;1mcfg="${RUNNER_CONFIG:-$HOME/.config/arbiter/gate-runner.env}"[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.6997232Z [36;1m[ -r "$cfg" ] || { echo "no runner config; comment not posted"; exit 0; }[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.6997632Z [36;1mset -a; . "$cfg"; set +a[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.6998073Z [36;1mpython3 "$ARBITER_HOME/scripts/gate_pr_publish.py" --out-dir arbiter-gate-out \[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.6998658Z [36;1m  --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$HEAD_SHA" || true[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7031191Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7031553Z env:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7032012Z   CODEQL_ACTION_JOB_RUN_UUID: 28fb3cec-bb1e-49cb-ab7a-3ecd8cba753b
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7032692Z   CODEQL_ACTION_FEATURE_MULTI_LANGUAGE: false
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7033000Z   CODEQL_ACTION_FEATURE_SANDWICH: false
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7033292Z   CODEQL_ACTION_FEATURE_SARIF_COMBINE: true
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7033836Z   CODEQL_ACTION_FEATURE_WILL_UPLOAD: true
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7034131Z   CODEQL_ACTION_VERSION: 4.39.1
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7034478Z   CODEQL_ACTION_ANALYSIS_KEY: .github/workflows/arbiter-gate.yml:gate
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7034898Z   CODEQL_WORKFLOW_STARTED_AT: 2026-10-30T02:41:52.011Z
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7035403Z   CODEQL_UPLOAD_SARIF_ARBITER_GATE__ARBITER_GATE: CODEQL_UPLOAD_SARIF_ARBITER_GATE__ARBITER_GATE
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7039254Z   GITHUB_TOKEN: ***
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7039493Z   PR: 2
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7039722Z   HEAD_SHA: 46e2d15c316bdd27dd121dc042a36b8ba1f823ee
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7040041Z   RUNNER_CONFIG: 
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:00.7040238Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0388238Z PR comment posted
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0554956Z ##[end-action id=__sam029031_arbiter-gate-demo.__run;outcome=success;conclusion=success;duration_ms=1359]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0560672Z ##[start-action display=Result;id=__sam029031_arbiter-gate-demo.__run_2]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0581435Z ##[group]Run rm -rf arbiter-gate-out arbiter-gate-pr
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0581930Z [36;1mrm -rf arbiter-gate-out arbiter-gate-pr[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0582597Z [36;1mcase "${RC:-2}" in[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0582943Z [36;1m  0) echo "ARBITER Gate: 放行（exit 0）。沒有找到可證明的攻擊不等於安全。"; exit 0 ;;[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0594386Z [36;1m  1) echo "::error::ARBITER Gate: 擋合併（exit 1）。見 PR 留言與 Security 分頁。"; exit 1 ;;[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0595140Z [36;1m  *) echo "::error::ARBITER Gate: 無法判定（稽核未完成，exit 2）。這不是發現漏洞，也不算通過。"; exit 2 ;;[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0595642Z [36;1mesac[0m
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0629717Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0630421Z env:
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0630711Z   CODEQL_ACTION_JOB_RUN_UUID: 28fb3cec-bb1e-49cb-ab7a-3ecd8cba753b
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0631118Z   CODEQL_ACTION_FEATURE_MULTI_LANGUAGE: false
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0631429Z   CODEQL_ACTION_FEATURE_SANDWICH: false
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0631722Z   CODEQL_ACTION_FEATURE_SARIF_COMBINE: true
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0632039Z   CODEQL_ACTION_FEATURE_WILL_UPLOAD: true
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0632324Z   CODEQL_ACTION_VERSION: 4.39.1
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0632672Z   CODEQL_ACTION_ANALYSIS_KEY: .github/workflows/arbiter-gate.yml:gate
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0633300Z   CODEQL_WORKFLOW_STARTED_AT: 2026-10-30T02:41:52.011Z
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0633845Z   CODEQL_UPLOAD_SARIF_ARBITER_GATE__ARBITER_GATE: CODEQL_UPLOAD_SARIF_ARBITER_GATE__ARBITER_GATE
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0634447Z   RC: 0
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0634631Z   MODE: audit
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0634818Z ##[endgroup]
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0725492Z ARBITER Gate: 放行（exit 0）。沒有找到可證明的攻擊不等於安全。
+ARBITER Gate	Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0732650Z ##[end-action id=__sam029031_arbiter-gate-demo.__run_2;outcome=success;conclusion=success;duration_ms=17]
+ARBITER Gate	Post Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	﻿2026-10-30T02:42:02.0955240Z Post job cleanup.
+ARBITER Gate	Post Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0959818Z ##[start-action display=Upload SARIF to code scanning;id=__6b33619a-0dea-460e-9af7-8036bc9d66ca.__github_codeql-action]
+ARBITER Gate	Post Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.0999398Z Post job cleanup.
+ARBITER Gate	Post Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.4568860Z ##[group]Uploading combined SARIF debug artifact
+ARBITER Gate	Post Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.4571633Z ##[endgroup]
+ARBITER Gate	Post Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.4659402Z ##[end-action id=__6b33619a-0dea-460e-9af7-8036bc9d66ca.__github_codeql-action;outcome=success;conclusion=success;duration_ms=369]
+ARBITER Gate	Post Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.4662743Z ##[start-action display=Check out the PR head;id=__6b33619a-0dea-460e-9af7-8036bc9d66ca.__actions_checkout]
+ARBITER Gate	Post Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.4729274Z Post job cleanup.
+ARBITER Gate	Post Run sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main	2026-10-30T02:42:02.5688033Z ##[end-action id=__6b33619a-0dea-460e-9af7-8036bc9d66ca.__actions_checkout;outcome=success;conclusion=success;duration_ms=102]
+ARBITER Gate	Complete job	﻿2026-10-30T02:42:02.5746769Z Cleaning up orphan processes

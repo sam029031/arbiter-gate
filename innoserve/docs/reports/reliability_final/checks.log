@@ -1,0 +1,60 @@
+== start 2026-10-30 22:52:28  (eval running: no)
+== core files vs innoserve-base
+agent/tools diff lines: 0
+ 1 file changed, 17 insertions(+), 2 deletions(-)
+== 8 probes
+victim         rc=0  4/4 as expected
+forgery        rc=0  6/6 as expected
+halt           rc=0  3/3 as expected
+drain          rc=0  2/2 as expected
+sweep          rc=0  2/2 as expected
+latebinding    rc=0  4/4 as expected
+setup_forgery  rc=0  3/3 as expected
+gain           rc=0  2/2 as expected
+8/8 exit 0
+== patch_probe        rc=0  5/5 as expected
+== regression_probe   rc=0  6/6 as expected
+== mcp_probe          rc=0  3/3 as expected (no LLM request: the server runs forge only)
+== diffscan_probe     rc=0  13/13 as expected
+== pr_gate_probe      rc=0  7/7 as expected
+== action_fork_probe  rc=0  22/22 as expected
+== repo_patch_probe   rc=0  5/5 as expected
+== reattack_probe     rc=0  5/5 as expected
+== project_upload_probe rc=0  10/10 as expected
+== liveness_patch_probe rc=0  10/10 as expected
+== pr_gate_probe --sandbox rc=0  7/7 as expected
+== repo_patch_probe --sandbox rc=0  6/6 as expected
+== live_attack rc=0    PROVEN on a live chain: value left the contract, the attacker holds it,
+== live_attack --patched rc=0    NOT PROVEN. The transcript above is what actually happened.
+<scratchpad>/checks_p7b.sh: line 24: syntax error near unexpected token `(' while looking for matching `)'
+<scratchpad>/checks_p7b.sh: line 24: `out=$(timeout 900 (cd .. && python3 service/tests/sandbox_assertions.py) 2>&1); echo "== sandbox_assertions rc=$?  $(printf '%s\n' "$out" | tail -1)"'
+== (rerun of the last three items after fixing the script's sandbox_assertions line)
+== sandbox_assertions rc=0  7/7 passed, 0 skipped; sandbox containers left: none
+   leftover containers: 0
+== gate spark-test-2 rc=1
+  error results 1 == proven findings in gate.json 1: yes
+== demo_gate.sh --auto rc=0
+       11.2 s  第 3 段  真鏈：同一個合約，真的交易
+        0.0 s  第 4 段  收尾
+       35.3 s  合計（各段相加）
+       53.8 s  含暫停的總時間
+   grep host paths in demo_gate output: 0
+   ledger lines 285 -> 285
+== end 2026-10-30 22:59:27
+
+== post-revert subset 2026-10-30 23:04:50 (gateway.py == a461776; no DGX request)
+gateway.py diff vs a461776: 0 lines; agent/tools vs innoserve-base: 0 lines; workspace:  1 file changed, 17 insertions(+), 2 deletions(-)
+victim         rc=0  4/4 as expected
+forgery        rc=0  6/6 as expected
+halt           rc=0  3/3 as expected
+drain          rc=0  2/2 as expected
+sweep          rc=0  2/2 as expected
+latebinding    rc=0  4/4 as expected
+setup_forgery  rc=0  3/3 as expected
+gain           rc=0  2/2 as expected
+== patch_probe        rc=0  5/5 as expected
+== regression_probe   rc=0  6/6 as expected
+== reattack_probe     rc=0  5/5 as expected
+== liveness_patch_probe rc=0  10/10 as expected
+== demo_gate.sh --auto --no-smoke rc=0  host paths: 0
+== end 2026-10-30 23:06:18

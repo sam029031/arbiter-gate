@@ -1,0 +1,3 @@
+sanitized reached 1 rung2 fail exit 1
+orig reached 2 rung2 pass exit 1
+rel reached 2 rung2 pass exit 1

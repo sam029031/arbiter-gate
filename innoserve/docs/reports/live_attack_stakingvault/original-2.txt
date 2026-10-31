@@ -21,4 +21,4 @@
   PROVEN on a live chain: value left the vault, the attacker holds it,
   and the victim who staked 2 ETH did not get it back.
 
-  transcript: /home/sam/innoserve/reports/live_attack_stakingvault/original-2.json
+  transcript: ~/innoserve/reports/live_attack_stakingvault/original-2.json

@@ -247,7 +247,7 @@ def main() -> int:
                        and victim_recovered < victim_paid_in),
     }
     print(f"\n  target: {meta['target']}"
-          + (f" ({meta['patches']}, {meta['model']}, {meta['changed_lines']} lines)"
+          + (f" ({Path(meta['patches']).name}, {meta['model']}, {meta['changed_lines']} lines)"
              if meta["target"] == "patched" else ""))
     print(f"  A  victim recovered, control chain   {_eth(verdict['A_recovered_control_wei']):>12}")
     print(f"  B  victim recovered, attack chain    {_eth(victim_recovered):>12}"

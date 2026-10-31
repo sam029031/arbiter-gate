@@ -1,7 +1,7 @@
 {
  "meta": {
   "target": "patched",
-  "patches": "/home/sam/innoserve/arbiter-audit/arbiter/runs/spark-test-4.patches.jsonl",
+  "patches": "~/innoserve/arbiter-audit/arbiter/runs/spark-test-4.patches.jsonl",
   "model": "arbiter-gpt:latest",
   "changed_lines": 6,
   "patched_sha256": "4f12f7bc2df053b2bff6e651ead6cc87517797494acd2f5b8d96c5841f1587ca"

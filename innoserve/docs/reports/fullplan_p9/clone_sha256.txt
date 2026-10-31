@@ -1,0 +1,25 @@
+arbiter/arbiter/__init__.py: OK
+arbiter/arbiter/agent.py: OK
+arbiter/arbiter/bastet_arm.py: OK
+arbiter/arbiter/benchmark.py: OK
+arbiter/arbiter/broadside.py: OK
+arbiter/arbiter/cascade_lib.py: OK
+arbiter/arbiter/citation.py: OK
+arbiter/arbiter/dump.py: FAILED
+arbiter/arbiter/evaluate.py: OK
+arbiter/arbiter/gateway.py: FAILED
+arbiter/arbiter/latebinding.py: OK
+arbiter/arbiter/live.py: OK
+arbiter/arbiter/live_replay.py: FAILED
+arbiter/arbiter/onchain.py: OK
+arbiter/arbiter/proposals.py: FAILED
+arbiter/arbiter/prove.py: OK
+arbiter/arbiter/reconstruct.py: OK
+arbiter/arbiter/repo.py: FAILED
+arbiter/arbiter/run.py: FAILED
+arbiter/arbiter/score.py: OK
+arbiter/arbiter/tools.py: OK
+arbiter/arbiter/triage.py: OK
+arbiter/arbiter/workspace.py: FAILED
+arbiter/cli.py: FAILED
+sha256sum: WARNING: 8 computed checksums did NOT match

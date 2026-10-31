@@ -1,0 +1,4 @@
+4/4 as expected
+victim rc=0
+5/5 as expected
+patch rc=0

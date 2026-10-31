@@ -1,0 +1,16 @@
+== start 2026-10-30 12:14:12
+== pr_gate_probe --sandbox rc=0  7/7 as expected
+== repo_patch_probe --sandbox rc=0  6/6 as expected
+== reattack_probe rc=0  5/5 as expected
+== sandbox_assertions rc=0  7/7 passed, 0 skipped; sandbox containers left: none
+   leftover containers: 0
+== gate spark-test-2 rc=1
+  error results 1 == proven findings in gate.json 1: yes
+  error results 1 == proven findings in gate.json 1: yes
+  error results 1 == proven findings in gate.json 1: yes
+== demo_gate.sh --auto rc=0
+        0.0 s  第 4 段  收尾
+       14.0 s  合計（各段相加）
+       32.2 s  含暫停的總時間
+   host paths in demo_gate output: 0
+== end 2026-10-30 12:16:11

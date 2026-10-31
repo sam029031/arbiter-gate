@@ -1,0 +1,44 @@
+{
+ "proven_function": "withdrawAll, withdraw",
+ "hypothesis": "Attacker deposits 1 ether then re‑enters withdrawAll to steal victim’s funds",
+ "poc_name": "TwoDoorVaultReentrancy2ExploitPoc",
+ "patch_used": "withdrawAll",
+ "gate": {
+  "0": "pass",
+  "L": "pass",
+  "3": "pass",
+  "1": "pass",
+  "2": "pass",
+  "4": "not_applicable"
+ },
+ "reattack": {
+  "n": 1,
+  "ruled_out": [
+   "Attacker deposits 1 ether then re‑enters withdrawAll to steal victim’s funds"
+  ],
+  "status": "proven",
+  "elapsed_s": 103.72,
+  "requests": 7,
+  "turns": 7,
+  "stop_reason": "submit_finding",
+  "tried": [
+   "withdraw(uint256) updates balance after external call, allowing re‑entrancy to drain other users' deposits.",
+   "withdraw(uint256) updates balance after external call, allowing re‑entrancy to drain other users' deposits.",
+   "withdraw(uint256) updates balance after external call, allowing re‑entrancy to drain other users' deposits without reverting."
+  ],
+  "new_attack": {
+   "poc_name": "exploitExploitPoc",
+   "predicate": "victim_loss",
+   "hypothesis": "withdraw(uint256) updates balance after external call, allowing re‑entrancy to drain other users' deposits without reverting.",
+   "finding": {
+    "title": "Re‑entrancy in withdraw(uint256) allows draining of other users’ deposits",
+    "vulnerable_function": "withdraw",
+    "offending_expression": "(bool ok, ) = msg.sender.call{value: amount}(\"\");",
+    "attack_path": "TwoDoorVault.sol",
+    "severity": "High"
+   }
+  },
+  "wall_s": 103.72
+ },
+ "result": "proven"
+}

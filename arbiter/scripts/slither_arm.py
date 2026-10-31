@@ -21,7 +21,10 @@ property of the output format rather than of one tool.
 
     scripts/slither_arm.py --evalset evalsets/v3_authored.json --out runs/slither.json
 
-Needs slither and a solc that matches this machine's architecture on PATH.
+Needs slither (on PATH, $ARBITER_SLITHER, or the tools venv beside the checkout) and a
+forge-downloaded solc under ~/.svm. The analysis itself is arbiter.static_hints.run_slither,
+which the gate also uses; `run_one` is that function with a working directory the caller
+owns, and every finding keeps its source lines and enclosing function.
 """
 
 from __future__ import annotations
@@ -37,29 +40,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from arbiter.score import Confusion  # noqa: E402
+from arbiter.static_hints import (CONFIDENCES, IMPACTS, find_slither,  # noqa: E402
+                                  run_slither)
 
-IMPACTS = ["High", "Medium", "Low", "Informational", "Optimization"]
-CONFIDENCES = ["High", "Medium", "Low"]
 
-
-def run_one(code: str, slither: str, timeout: int) -> tuple[list[dict], str]:
-    """Every detector hit for one contract, or the reason there are none."""
-    with tempfile.TemporaryDirectory(dir=Path.home()) as tmp:
-        d = Path(tmp)
-        (d / "T.sol").write_text(code, encoding="utf-8")
-        out = d / "out.json"
-        proc = subprocess.run(
-            [slither, "T.sol", "--json", str(out)],
-            cwd=d, capture_output=True, text=True, timeout=timeout,
-        )
-        if not out.is_file():
-            tail = (proc.stderr or proc.stdout).strip().splitlines()
-            return [], (tail[-1][:150] if tail else "no json written")
-        try:
-            data = json.loads(out.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            return [], f"bad json: {exc}"
-        return (data.get("results") or {}).get("detectors") or [], ""
+def run_one(code: str, slither: str, timeout: int, work_dir: Path,
+            filename: str = "T.sol") -> tuple[list[dict], str]:
+    """Every detector hit for one contract (check, impact, confidence, line, end_line,
+    function, message), or the reason there are none. `work_dir` is the caller's."""
+    run = run_slither(code, filename, work_dir, timeout=timeout, slither=slither)
+    return run.findings, run.reason
 
 
 def confusion(rows: list[dict], min_impact: int, min_conf: int) -> Confusion:
@@ -91,28 +81,21 @@ def main() -> int:
     ap.add_argument("--timeout", type=int, default=180)
     args = ap.parse_args()
 
-    slither = shutil.which("slither") or str(
-        Path.home() / ".venvs" / "slither" / "bin" / "slither")
-    if not Path(slither).is_file():
-        print("slither not found")
-        return 2
-    if not shutil.which("solc"):
-        print("solc is not on PATH. solc-select ships x86 binaries; on this box the "
-              "architecture-correct one is under ~/.local/share/svm/<version>/.")
+    slither = find_slither()
+    if not slither:
+        print("slither not found (PATH, $ARBITER_SLITHER, or ../venv-tools/bin/slither)")
         return 2
 
     items = json.loads(args.evalset.read_text(encoding="utf-8"))["items"]
     rows: list[dict] = []
     errs = 0
+    tmp_root = Path(tempfile.mkdtemp(prefix="slither-arm-"))
     for i, it in enumerate(items, 1):
-        findings, err = run_one(it["code"], slither, args.timeout)
+        findings, err = run_one(it["code"], slither, args.timeout, tmp_root / it["id"])
         if err:
             errs += 1
         rows.append({"id": it["id"], "label": it["label"],
-                     "findings": [{"check": f.get("check"),
-                                   "impact": f.get("impact"),
-                                   "confidence": f.get("confidence")}
-                                  for f in findings],
+                     "findings": findings,
                      "error": err})
         print(f"  {i:3d}/{len(items)}  {it['id'][:44]:<44} "
               f"{len(findings):3d} findings{'  ' + err if err else ''}")
@@ -145,6 +128,7 @@ def main() -> int:
           "no contract,\n  no test and no transaction, so there is nothing for any "
           "adjudicator to run.")
 
+    shutil.rmtree(tmp_root, ignore_errors=True)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps({
         "arm": "slither",

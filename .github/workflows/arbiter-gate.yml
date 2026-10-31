@@ -1,0 +1,44 @@
+# Example workflow for the ARBITER Gate action (.github/actions/arbiter-gate).
+#
+# Copy this file and the action into a Foundry repository, register a self-hosted runner
+# with the label `arbiter-gate` on a machine that has ARBITER installed (see the action's
+# header for the runner-host config file), and make the job "ARBITER Gate" a required
+# status check of the default branch.
+#
+# Every PR triggers the workflow; the audit itself runs only when the PR changed a .sol
+# file (scripts/gate_pr.sh). A `paths: ['**.sol']` filter would be simpler, but a required
+# check whose workflow never starts leaves every other PR waiting forever.
+#
+# `pull_request`, never `pull_request_target`: a PR's code must not run with this
+# repository's write token. PRs from forks are refused by the action (exit 2) before
+# anything is checked out; also set "Require approval for all external contributors"
+# (Settings > Actions > General), so that no outside PR reaches the runner unreviewed.
+#
+# The action is loaded from a fixed ref of a trusted repository (the demo repository
+# carries the same action.yml as this one), not from the PR's checkout: it is fetched
+# without checking anything out, so the fork refusal runs before any PR code is on disk,
+# and a PR that edits the action is still checked by the one on main. (A PR can still
+# edit this workflow file itself -- another reason outside PRs need approval.)
+name: ARBITER Gate
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  security-events: write
+  actions: read
+
+concurrency:
+  group: arbiter-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: ARBITER Gate
+    runs-on: [self-hosted, arbiter-gate]
+    timeout-minutes: 45
+    steps:
+      - uses: sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main

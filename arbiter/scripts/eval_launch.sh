@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+# Launch one pre-registered arbiter-gpt run over v3_authored.json inside tmux.
+#
+#   scripts/eval_launch.sh <run-id> [--resume]
+#   scripts/eval_launch.sh dryrun --dry-run
+#
+# Run it from the eval worktree (the one checked out at tag eval-freeze), never from the
+# development checkout: the first precheck refuses any tree whose HEAD is not eval-freeze.
+# Settings are the ones PREREGISTRATION_arbitergpt_v3.md fixes; only the run id varies.
+#
+# What it starts, in tmux session "eval" (no terminal tab is relied on):
+#   window "tunnel"  ssh -N in the foreground, restarted in a loop if it exits
+#   window "run"     cli.py run, stdout+stderr -> runs/<run-id>.log
+#   window "watch"   scripts/eval_watch.sh <run-id>
+#
+# The SSH target is read from ~/.config/arbiter/tunnel.conf (outside every repository)
+# and is never echoed. Prechecks send no LLM request.
+#
+# --dry-run (run id "dryrun") exercises the same tmux layout in about half a minute and
+# sends no LLM request: the tunnel window forwards a test port (11435) so the tunnel the
+# machine already has stays up, the run window is a stub that only writes the sessions
+# log, the watcher probes every 5 s, and the session is removed at the end.
+set -u
+
+ALLOWED_RUN_IDS="gptoss-v3-r1 gptoss-v3-r2 gptoss-v3-r3"
+EVALSET="evalsets/v3_authored.json"
+MODEL="arbiter-gpt:latest"
+ATTEMPTS=3
+MAX_TURNS=16
+MAX_TOKENS=4096
+RPM=45
+CONCURRENCY=1   # fixed by the throughput test in the pre-registration, section 3
+TUNNEL_CONF="${ARBITER_TUNNEL_CONF:-$HOME/.config/arbiter/tunnel.conf}"
+MIN_FREE_GB=20
+SESSION=eval
+PORT=11434
+DRY=0
+
+RUN_ID="${1:-}"; shift || true
+RESUME=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --resume) RESUME=1; shift ;;
+    --dry-run) DRY=1; shift ;;
+    *) echo "unknown argument: $1" >&2; exit 64 ;;
+  esac
+done
+
+ARB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # .../arbiter
+TREE="$(cd "$ARB/.." && pwd)"
+fail() { echo "PRECHECK FAIL: $*" >&2; exit 1; }
+ok() { echo "  ok  $*"; }
+
+echo "prechecks (no LLM request):"
+if [ "$DRY" -eq 1 ]; then
+  [ "$RUN_ID" = "dryrun" ] || fail "--dry-run takes run id 'dryrun'"
+  ALLOWED_RUN_IDS="dryrun"; SESSION=eval-dry; PORT=11435
+  rm -f "$ARB/runs/dryrun.sessions.log" "$ARB/runs/dryrun.watch.log"
+fi
+case " $ALLOWED_RUN_IDS " in
+  *" $RUN_ID "*) ok "run id $RUN_ID is pre-registered" ;;
+  *) fail "run id '$RUN_ID' is not one of: $ALLOWED_RUN_IDS" ;;
+esac
+
+head_sha="$(git -C "$TREE" rev-parse HEAD 2>/dev/null)"
+freeze_sha="$(git -C "$TREE" rev-parse -q --verify 'eval-freeze^{commit}' 2>/dev/null)"
+[ -n "$freeze_sha" ] || fail "tag eval-freeze does not exist"
+[ "$head_sha" = "$freeze_sha" ] || fail "HEAD ${head_sha:0:7} is not eval-freeze ${freeze_sha:0:7}; run from the eval worktree"
+[ -z "$(git -C "$TREE" status --porcelain --untracked-files=no)" ] || fail "tracked files differ from eval-freeze"
+ok "HEAD = eval-freeze (${freeze_sha:0:7}), tracked files clean"
+
+[ -f "$TREE/.env" ] || fail ".env missing at the root of this worktree"
+ok ".env present"
+
+others="$(pgrep -af 'gptoss-v3' | grep -v -e pgrep -e eval_launch.sh -e eval_watch.sh || true)"
+[ -z "$others" ] || fail "another gptoss-v3 process is running"
+tmux has-session -t "$SESSION" 2>/dev/null && fail "tmux session '$SESSION' already exists (tmux attach -t $SESSION)"
+ok "no other gptoss-v3 process, no tmux session '$SESSION'"
+
+free_gb="$(df --output=avail -BG /mnt/c 2>/dev/null | tail -1 | tr -dc 0-9)"
+[ -n "$free_gb" ] || fail "cannot read free space on C:"
+[ "$free_gb" -gt "$MIN_FREE_GB" ] || fail "C: has ${free_gb} GB free, need more than ${MIN_FREE_GB} GB"
+ok "C: ${free_gb} GB free"
+
+results="$ARB/runs/$RUN_ID.results.jsonl"
+if [ -s "$results" ] && [ "$RESUME" -ne 1 ]; then
+  fail "$RUN_ID already has rows; pass --resume to continue it (after eval_requeue.py if rows hit infrastructure errors)"
+fi
+if [ "$RESUME" -eq 1 ] && [ ! -s "$results" ]; then
+  fail "--resume given but $RUN_ID has no rows yet"
+fi
+
+PATH="$HOME/.foundry/bin:$PATH"
+command -v forge >/dev/null || fail "forge not on PATH"
+command -v tmux >/dev/null || fail "tmux not installed"
+ok "forge $(forge --version | head -1 | awk '{print $3}'), tmux present"
+
+[ -f "$TUNNEL_CONF" ] || fail "tunnel config ~/.config/arbiter/tunnel.conf missing"
+# shellcheck disable=SC1090
+. "$TUNNEL_CONF"
+[ -n "${ARBITER_TUNNEL_TARGET:-}" ] || fail "ARBITER_TUNNEL_TARGET not set in tunnel config"
+ssh -o BatchMode=yes -o ConnectTimeout=15 "$ARBITER_TUNNEL_TARGET" true >/dev/null 2>&1 \
+  || fail "ssh to the tunnel host failed (key auth, BatchMode)"
+ok "ssh to the tunnel host works (address not shown)"
+
+mkdir -p "$ARB/runs"
+SESSIONS_LOG="$ARB/runs/$RUN_ID.sessions.log"
+TUNNEL_SH="$ARB/runs/.tunnel.sh"
+[ "$DRY" -eq 1 ] && TUNNEL_SH="$ARB/runs/.tunnel-dry.sh"
+FORWARDS='$ARBITER_TUNNEL_FORWARDS'
+[ "$DRY" -eq 1 ] && FORWARDS="-L $PORT:localhost:11434"
+cat > "$TUNNEL_SH" <<EOF
+#!/usr/bin/env bash
+# Generated by eval_launch.sh. Foreground ssh -N, restarted whenever it exits.
+. "$TUNNEL_CONF"
+while true; do
+  echo "\$(date '+%F %T') tunnel up"
+  ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes \\
+      -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \\
+      $FORWARDS "\$ARBITER_TUNNEL_TARGET" 2>&1 | sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}/<host>/g'
+  echo "\$(date '+%F %T') tunnel exited (rc \${PIPESTATUS[0]}), restarting in 5 s"
+  sleep 5
+done
+EOF
+chmod 700 "$TUNNEL_SH"
+
+# The tunnel this launcher owns binds 11434 itself, so any tunnel opened elsewhere (for
+# example from a Claude Code terminal with ssh -f) has to go first. Its ssh login was just
+# verified above, so the replacement is known to connect before the old one is closed.
+old=""
+# Anchored at the start of the command line: an unanchored pattern also matches any shell
+# whose command text merely contains this string, and that shell would be killed.
+[ "$DRY" -eq 1 ] || old="$(pgrep -f '^ssh .*-L 11434:localhost:11434' || true)"
+for pid in $old; do
+  kill "$pid" 2>/dev/null && echo "  closed the previous tunnel (pid $pid)"
+done
+sleep 1
+
+tmux new-session -d -s "$SESSION" -n tunnel -x 200 -y 50
+tmux set-option -t "$SESSION" remain-on-exit on >/dev/null
+tmux send-keys -t "$SESSION:tunnel" "exec bash '$TUNNEL_SH'" Enter
+
+up=0
+for _ in $(seq 1 30); do
+  if curl -s --max-time 3 "http://localhost:$PORT/api/version" >/dev/null 2>&1; then up=1; break; fi
+  sleep 1
+done
+if [ "$up" -ne 1 ]; then
+  tmux kill-session -t "$SESSION"
+  fail "tunnel in tmux did not answer on $PORT within 30 s (session removed)"
+fi
+ok "tunnel in tmux answers on $PORT"
+
+RUN_CMD="cd '$ARB' && export PATH='$HOME/.foundry/bin':\$PATH && set -a && . ../.env && set +a && \
+echo \"\$(date '+%F %T') start $RUN_ID concurrency=$CONCURRENCY resume=$RESUME head=${freeze_sha:0:7}\" >> '$SESSIONS_LOG' && \
+python3 cli.py run --evalset $EVALSET --model $MODEL --run-id $RUN_ID \
+  --attempts $ATTEMPTS --max-turns $MAX_TURNS --max-tokens $MAX_TOKENS \
+  --concurrency $CONCURRENCY --rpm $RPM --repeats 1 >> runs/$RUN_ID.log 2>&1; \
+rc=\$?; echo \"\$(date '+%F %T') end $RUN_ID rc=\$rc\" >> '$SESSIONS_LOG'; \
+python3 scripts/eval_requeue.py $RUN_ID --check >> runs/$RUN_ID.log 2>&1; \
+echo \"run finished rc=\$rc; see runs/$RUN_ID.log\""
+if [ "$DRY" -eq 1 ]; then
+  RUN_CMD="cd '$ARB' && echo \"\$(date '+%F %T') start dryrun (stub, no LLM request)\" >> '$SESSIONS_LOG' && \
+sleep 8 && echo \"\$(date '+%F %T') end dryrun rc=0\" >> '$SESSIONS_LOG'"
+fi
+tmux new-window -t "$SESSION" -n run
+tmux send-keys -t "$SESSION:run" "$RUN_CMD" Enter
+tmux new-window -t "$SESSION" -n watch
+WATCH_ENV="EVAL_SESSION=$SESSION EVAL_PORT=$PORT EVAL_TUNNEL_SH='$TUNNEL_SH'"
+[ "$DRY" -eq 1 ] && WATCH_ENV="$WATCH_ENV EVAL_PROBE_EVERY=5 EVAL_REPORT_EVERY=10"
+tmux send-keys -t "$SESSION:watch" "cd '$ARB' && $WATCH_ENV bash scripts/eval_watch.sh $RUN_ID" Enter
+
+if [ "$DRY" -eq 1 ]; then
+  for _ in $(seq 1 40); do
+    grep -q "watch exits" "$ARB/runs/dryrun.watch.log" 2>/dev/null && break
+    sleep 1
+  done
+  echo "--- dryrun.sessions.log"; cat "$SESSIONS_LOG"
+  echo "--- dryrun.watch.log"; cat "$ARB/runs/dryrun.watch.log" 2>/dev/null
+  echo "--- tmux windows"; tmux list-windows -t "$SESSION" -F '#{window_name} dead=#{pane_dead}'
+  tmux kill-session -t "$SESSION"
+  rm -f "$TUNNEL_SH"
+  grep -q "watch exits" "$ARB/runs/dryrun.watch.log" 2>/dev/null \
+    && { echo "dry run OK (session $SESSION removed)"; exit 0; } \
+    || { echo "dry run FAILED: watcher did not see the stub finish" >&2; exit 1; }
+fi
+
+echo
+echo "launched $RUN_ID in tmux session '$SESSION' (windows: tunnel, run, watch)"
+echo "  attach:  tmux attach -t $SESSION      (detach: Ctrl-b d)"
+echo "  log:     arbiter/runs/$RUN_ID.log (inside this worktree)"
+echo "  watch:   arbiter/runs/$RUN_ID.watch.log"

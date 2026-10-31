@@ -1,0 +1,28 @@
+   0.0 stage 已收到：示範合約：存款金庫（StakingVault.sol）
+   1.0 stage 正在檢查合約能不能編譯（這一步還沒用到 AI）
+   1.1 stage AI 開始讀合約，想可能的攻擊方式
+   1.4 stage AI 正在讀合約，想可能的攻擊方式
+  48.7 turn run_exploit
+  48.7 stage AI 寫好了一段攻擊程式，系統正在隔離環境裡的模擬區塊鏈上實際執行它
+  49.1 tool_result 攻擊程式跑完了，但沒有造成損失；AI 正在修改
+  49.1 stage AI 正在讀合約和上一步的結果，決定下一步
+ 156.6 turn 
+ 156.6 stage AI 正在讀合約，想可能的攻擊方式
+ 190.0 turn run_exploit
+ 190.0 stage AI 寫好了一段攻擊程式，系統正在隔離環境裡的模擬區塊鏈上實際執行它
+ 190.8 tool_result 攻擊程式跑完了，但沒有造成損失；AI 正在修改
+ 190.8 stage AI 正在讀合約和上一步的結果，決定下一步
+ 219.7 turn run_exploit
+ 219.7 stage AI 寫好了一段攻擊程式，系統正在隔離環境裡的模擬區塊鏈上實際執行它
+ 219.7 tool_result 工具回報錯誤，AI 正在調整
+ 219.7 stage AI 正在讀合約和上一步的結果，決定下一步
+ 233.9 turn run_exploit
+ 233.9 stage AI 寫好了一段攻擊程式，系統正在隔離環境裡的模擬區塊鏈上實際執行它
+ 234.1 tool_result AI 寫的程式沒辦法編譯，正在修正
+ 234.1 stage AI 正在讀合約和上一步的結果，決定下一步
+ 261.8 turn 
+ 261.8 stage AI 正在讀合約，想可能的攻擊方式
+ 267.2 turn conclude_safe
+ 267.2 stage AI 認為找不到能成功的攻擊，系統正在確認它是否真的試過
+ 269.2 static ran
+ 269.5 stage 完成

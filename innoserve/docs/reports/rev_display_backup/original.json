@@ -1,7 +1,7 @@
 {
  "meta": {
   "target": "original",
-  "path": "/home/sam/innoserve/arbiter-audit/arbiter/examples/StakingVault.sol"
+  "path": "~/innoserve/arbiter-audit/arbiter/examples/StakingVault.sol"
  },
  "verdict": {
   "rule": "live_attack.py: drained > 0 and attacker_net > 0 and victim_recovered < victim_paid_in",

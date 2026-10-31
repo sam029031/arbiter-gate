@@ -46,8 +46,44 @@ SKIP_DIRS = {
 }
 
 # Where the vendored libraries live. Built by scripts/build_dep_cache.sh from the
-# measured import census, not from a guess at what might be needed.
+# measured import census, not from a guess at what might be needed. The sandbox image
+# carries its own copy at /opt/soldeps; service/sandbox/build.sh exports that copy here so
+# the host resolves imports against exactly the files the image has.
 DEFAULT_DEP_CACHE = Path(os.path.expanduser("~/soldeps"))
+
+
+def default_dep_cache() -> Path:
+    """$ARBITER_DEP_CACHE when set (a job-local copy, see localize_dep_cache), else ~/soldeps."""
+    env = os.environ.get("ARBITER_DEP_CACHE")
+    return Path(env) if env else DEFAULT_DEP_CACHE
+
+
+def localize_dep_cache(dest: Path, source: Path | None = None) -> dict[str, object]:
+    """Copy the cache's .sol files into `dest` (inside a job directory) and return a summary.
+
+    Remappings are absolute paths, and a sandboxed job's container mounts only the job
+    directory at its own path, so a remapping into ~/soldeps names a file the container
+    cannot see. Copying into the job keeps that mount rule and lets the same remappings
+    work with and without the sandbox. The whole cache rather than the closure's packages:
+    repair() falls back to other packages when the compiler names a missing source, and
+    the .sol files alone are about 10 MB / half a second. A copy, never hard links: the
+    job directory is writable from inside the container, and a write through a link would
+    reach every later job.
+    """
+    src = Path(source or default_dep_cache())
+    dest = Path(dest)
+    if not src.is_dir():
+        return {"ok": False, "reason": f"dependency cache missing ({src.name})", "files": 0}
+    n = 0
+    for f in src.rglob("*.sol"):
+        if not f.is_file() or f.is_symlink():
+            continue
+        out = dest / f.relative_to(src)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(f.read_bytes())
+        n += 1
+    packages = sorted(d.name for d in src.iterdir() if d.is_dir())
+    return {"ok": True, "files": n, "packages": packages}
 
 # OpenZeppelin is version-sensitive in a way the others are not: a contract pinned to
 # ^0.6.12 cannot compile against v5, and v5 removed names v4 code still uses. Ordered
@@ -172,7 +208,7 @@ class RepoContext:
     def __init__(self, repo_root: Path, dep_cache: Path | None = None,
                  long_tail_first: bool = True) -> None:
         self.root = Path(repo_root).resolve()
-        self.dep_cache = Path(dep_cache or DEFAULT_DEP_CACHE)
+        self.dep_cache = Path(dep_cache or default_dep_cache())
         self.long_tail_first = long_tail_first
         self.index = FileIndex.build(self.root)
         self._dep_index: dict[str, FileIndex] = {}

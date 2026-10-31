@@ -8,7 +8,9 @@ mapping below is checked top to bottom and the first match wins:
     proven_exploitable    outcome.proven -- a passed, harness-adjudicated exploit
     not_executed          no compilable context, no toolchain, an exception (a gateway
                           failure lands here), or not one completed agent turn
-    static_hint_unproven  reserved for the Slither adapter; never produced yet
+    static_hint_unproven  not proven, but Slither flags impact >= Medium and confidence
+                          >= Medium (with_static_hints, applied by gate.py; a hint, never
+                          evidence)
     no_provable_attack    everything else, conclude_safe and turn_budget_exhausted
                           included -- a search that found nothing, not a clean bill
 
@@ -63,3 +65,10 @@ def worst_exit(verdicts: list[str]) -> int:
     if NOT_EXECUTED in verdicts:
         return 2
     return 0
+
+
+def with_static_hints(verdict: str, hints: list[Any]) -> str:
+    """Raise no_provable_attack to static_hint_unproven when a static tool flagged
+    something at the display threshold. Proven and not-executed stay what they are: a
+    hint is never evidence, and it cannot stand in for an audit that did not finish."""
+    return STATIC_HINT if verdict == NO_PROVABLE and hints else verdict

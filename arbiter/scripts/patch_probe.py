@@ -82,7 +82,9 @@ def main() -> int:
             ok = (r["accepted"] == (expect == "accept")
                   and all(got[n] == s for n, s in must.items()))
             if expect == "accept":
-                ok = ok and all(s == "pass" for s in got.values())
+                # hermetic: check 4 (the project's own tests) does not apply to one file
+                ok = ok and got["4"] == "not_applicable" and all(
+                    s == "pass" for n, s in got.items() if n != "4")
             marks = " ".join(f"{n}:{got[n]}" for n in GATE_ORDER)
             print(f"  [{'OK  ' if ok else 'WRONG'}] {label:16s} "
                   f"{'ACCEPTED' if r['accepted'] else 'REJECTED'}  {marks}  "

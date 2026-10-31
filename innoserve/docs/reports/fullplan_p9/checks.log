@@ -1,0 +1,54 @@
+== start 2026-10-31 00:40:41  (eval running: no)
+== core files
+agent/tools vs innoserve-base diff lines: 0
+workspace.py vs innoserve-base: +17/-2
+gateway.py vs a461776 diff lines: 0
+eval-worktree: HEAD 1c7f896, tracked changes 0
+== 8 probes
+victim         rc=0  4/4 as expected
+forgery        rc=0  6/6 as expected
+halt           rc=0  3/3 as expected
+drain          rc=0  2/2 as expected
+sweep          rc=0  2/2 as expected
+latebinding    rc=0  4/4 as expected
+setup_forgery  rc=0  3/3 as expected
+gain           rc=0  2/2 as expected
+8/8 exit 0
+== patch_probe                rc=0  5/5 as expected  (5s)
+== regression_probe           rc=0  6/6 as expected  (4s)
+== mcp_probe                  rc=0  3/3 as expected (no LLM request: the server runs forge only)  (2s)
+== diffscan_probe             rc=0  13/13 as expected  (1s)
+== pr_gate_probe              rc=0  7/7 as expected  (7s)
+== action_fork_probe          rc=0  22/22 as expected  (1s)
+== repo_patch_probe           rc=0  5/5 as expected  (9s)
+== reattack_probe             rc=0  5/5 as expected  (29s)
+== project_upload_probe       rc=0  10/10 as expected  (2s)
+== liveness_patch_probe       rc=0  10/10 as expected  (21s)
+== live_drain_probe           rc=0  7/7 as expected  (60s)
+== pr_gate_probe --sandbox    rc=0  7/7 as expected  (40s)
+== repo_patch_probe --sandbox rc=0  6/6 as expected  (18s)
+== live_attack                rc=0    and an ordinary user who queued first cannot get theirs back.  (6s)
+== live_attack --patched      rc=0    NOT PROVEN. The transcript above is what actually happened.  (6s)
+== sandbox_assertions         rc=0  7/7 passed, 0 skipped; sandbox containers left: none  (78s)
+   leftover containers: 0
+== gate spark-test-2 rc=1
+  gate_spark2.sarif: valid SARIF 2.1.0 (Draft4Validator); results: error=1 warning=0; executionSuccessful=[True]
+    error results 1 == proven findings in gate.json 1: yes
+== demo_gate.sh --auto rc=0  (92s)
+    耗時（程式本身，不含暫停與講話）
+         70.5 s  （12.4 預算    - s）  第 0 段  開場前：preflight（計劃書 12.7）＋準備錄製紀錄
+          0.0 s  （12.4 預算  105 s）  第 1 段  0:00–1:45  上傳／快取播放
+          0.1 s  （12.4 預算   45 s）  第 2 段  1:45–2:30  結果與 A/B/G
+         14.4 s  （12.4 預算   50 s）  第 3 段  2:30–3:20  證據等級與鏈上重播
+          0.0 s  （12.4 預算   60 s）  第 4 段  3:20–4:20  修補燈號
+          0.2 s  （12.4 預算   50 s）  第 5 段  4:20–5:10  PR 分頁（紅轉綠、SARIF）
+          0.0 s  （12.4 預算   50 s）  第 6 段  5:10–6:00  判定用語、收尾
+          0.0 s  （12.4 預算    - s）  問答  揭曉現場上傳（D6）
+         14.7 s  6 分鐘內各段的程式時間合計（第 1～6 段）
+          360 s  12.4 的 6 分鐘預算（第 1～6 段）
+      每一段的程式時間都在 12.4 的預算內
+         92.4 s  含 preflight、暫停的總時間
+   host paths in demo_gate output: 0
+== agent/tools after: 0 diff lines
+== end 2026-10-31 00:47:40
+checks done rc=0

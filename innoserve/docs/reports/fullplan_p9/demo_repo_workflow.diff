@@ -1,0 +1,21 @@
+--- a/.github/workflows/arbiter-gate.yml	2026-10-31 00:42:11.547145046 +0800
++++ b/.github/workflows/arbiter-gate.yml	2026-10-31 00:42:11.651981976 +0800
+@@ -7,8 +7,10 @@
+ #
+ # `pull_request`, never `pull_request_target`. PRs from forks are refused by the action
+ # (exit 2, "無法判定") before anything is checked out, and Settings > Actions requires
+-# approval before any outside contributor's PR runs at all. The action is loaded from
+-# main of this repository, not from the PR's checkout.
++# approval before any outside contributor's PR runs at all. The action is loaded from tag
++# v1 of the public repository sam029031/arbiter-gate (the finals snapshot), not from the
++# PR's checkout. This repository keeps its own copy in .github/actions/arbiter-gate/ so
++# that re-runs of the runs recorded before this change still find it at @main.
+ name: ARBITER Gate
+ 
+ on:
+@@ -31,4 +33,4 @@
+     runs-on: [self-hosted, arbiter-gate]
+     timeout-minutes: 45
+     steps:
+-      - uses: sam029031/arbiter-gate-demo/.github/actions/arbiter-gate@main
++      - uses: sam029031/arbiter-gate/.github/actions/arbiter-gate@v1

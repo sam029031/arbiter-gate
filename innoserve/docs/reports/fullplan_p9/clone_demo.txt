@@ -1,0 +1,225 @@
+
+==========================================================================
+  第 0 段  開場前：preflight（計劃書 12.7）＋準備錄製紀錄
+==========================================================================
+  全部結束碼 0 才開場；不算在 6 分鐘裡
+
+  .env       loaded (model: arbiter-gpt:latest)
+  preflight（12.7 的清單，逐一檢查結束碼）
+  forge/anvil/cast       rc=0    0.3 s  cast Version: 1.8.6
+  api_smoke              跳過（--no-smoke）：preflight 不完整，只能排練、不能開場
+  victim_probe           rc=0    0.6 s  4/4 as expected
+  forgery_probe          rc=0    0.1 s  6/6 as expected
+  halt_probe             rc=0    0.6 s  3/3 as expected
+  drain_probe            rc=0    0.5 s  2/2 as expected
+  sweep_probe            rc=0    1.6 s  2/2 as expected
+  latebinding_probe      rc=0    1.4 s  4/4 as expected
+  setup_forgery_probe    rc=0    1.0 s  3/3 as expected
+  gain_probe             rc=0    0.8 s  2/2 as expected
+  patch_probe            rc=0    4.0 s  5/5 as expected
+  live_attack            rc=0    4.3 s    and an ordinary user who queued first cannot get theirs back.
+  live_attack --patched  rc=0    4.3 s    NOT PROVEN. The transcript above is what actually happened.
+  PREFLIGHT OK（api_smoke 跳過）
+
+  網頁、本地鏈埠、錄製紀錄
+  web        started at http://127.0.0.1:8765/ (pid 642682, log runs/gate/demo/web.server.log; left running)
+  chain      方案 e 暖機一次：PROVEN（7.8 s）
+  recording  spark-test-2 錄製回放（4 倍速）跑完：37.2 s（重播＋forge 重跑，0 個 LLM 請求）
+
+  瀏覽器先開好這幾個分頁（12.4「開場前 10 分鐘」）
+    1 上傳頁    http://127.0.0.1:8765/
+    2 錄製紀錄  http://127.0.0.1:8765/job/20261031-005115-9371b2?stay=1   （工作頁，逐回合；留在這頁不跳轉）
+    3 結果頁    http://127.0.0.1:8765/result/64002c63275a
+    4 PR 頁     http://127.0.0.1:8765/github   （本機截圖，不用網路）；有網路時另開 https://github.com/sam029031/arbiter-gate-demo/pull/1
+
+  (this segment: 65.2 s)
+  .
+
+==========================================================================
+  第 1 段  0:00–1:45  上傳／快取播放
+==========================================================================
+  現場上傳放背景（D6）；6 分鐘講的是錄製紀錄
+
+
+  分頁 2（錄製紀錄的工作頁）：http://127.0.0.1:8765/job/20261031-005115-9371b2?stay=1
+  錄製回放：2026-10-31 的實際紀錄（arbiter-gpt:latest，4 倍速重播；損失數字與修補檢查是當場用 forge 重跑的）
+    回合 1  run_exploit → AI 寫的程式沒辦法編譯，正在修正
+    回合 2  run_exploit → 攻擊成立：系統確認有攻擊時受害者拿回的錢變少了
+    回合 3  （沒有呼叫工具）
+    回合 4  submit_finding → 系統接受回報：有已執行成功的攻擊當證據
+  >> （0:00）ARBITER Gate 是部署前的證據閘門：AI 寫攻擊，系統在沙箱裡實際執行，只有真的成功、受害者真的少拿回錢，才擋部署。
+  >> （0:15–0:50）警報器 vs 證據：別的工具給的是警報，我們給的是能重跑的攻擊。D7 沒有海報，這段指首頁或口頭講。
+  >> （0:50–1:45）逐回合念：AI 不能宣稱有漏洞，只能交出能跑的攻擊；成功條件在系統手上，AI 看不到。
+  >> 這是錄製紀錄，畫面上方標著日期；不是現在這一次。
+
+  (this segment: 0.0 s of the program; 12.4 gives the beat 105 s)
+  .
+
+==========================================================================
+  第 2 段  1:45–2:30  結果與 A/B/G
+==========================================================================
+  結果卡：已證實可攻擊（擋部署）；4 個環境的 A、B、G
+
+  （本地鏈兩向已在背景開跑，第 3 段印出）
+  分頁 3（結果頁）：http://127.0.0.1:8765/result/64002c63275a
+
+    判定      已證實可攻擊（擋部署）
+    模型      arbiter-gpt:latest；這次產生頁面的 LLM 請求 0
+    謂詞      victim_loss（嚴格謂詞：是）
+    A/B/G     2/2/1、2/2/1、2/2/1、2/0/7（ETH，4 個環境）
+  >> A 是沒有攻擊時受害者拿回多少，B 是有攻擊時拿回多少，G 是攻擊者賺多少。別人少拿的錢在攻擊者手上。
+  >> 數字照實顯示：哪幾個環境受害者沒有受損，畫面就是那樣。
+
+  (this segment: 0.0 s of the program; 12.4 gives the beat 45 s)
+  .
+
+==========================================================================
+  第 3 段  2:30–3:20  證據等級與鏈上重播
+==========================================================================
+  結果頁的證據等級；本地鏈（anvil）兩條鏈：一條有攻擊，一條沒有
+
+    證據等級  爬到第 1 階（1 合成環境、2 獨立 Foundry 專案、3 本地真鏈）
+    第 2 階   沒過
+    第 3 階   沒過：有攻擊的那條鏈上，「run()」這筆交易失敗（revert）。受害者沒有攻擊時領回 7 ETH、有攻擊時領回 7 ETH，攻擊者獲利 0 ETH。合成層只有在攻擊重複 8 輪的環境才造成損失；本地真鏈重播目前只跑一輪攻擊。
+
+  >> 這段鏈上攻擊是事先寫好的參考攻擊（victim_probe 的 DRAIN），不是 AI 這次產生的。
+
+  -- 原合約 examples/StakingVault.sol
+  control chain (chain 31337, http://127.0.0.1:8600)
+    ok  deploy StakingVault (5 ETH)    tx=0xc2abd9446c00f8e5af5d5127a85b15e6c3412b31f525ade3355be3fd39c0c313  gas=0
+    ok  stake()                        tx=0xfe07e5bdbae29c340c1ed3893a8049e057ac36651a390b84b11c26c6f1364a1c  gas=48,810
+    ok  deploy Attacker (1 ETH)        tx=0x558135e78c50e81437b3f8bed1e933052bb828b23795708184f73636e13edead  gas=0
+    ok  unstake()                      tx=0x22337113b2593ae139790bc71497c7c64ff0cb52ba5bc2caf580a944ac418e47  gas=33,918
+    vault 7 ETH -> 7 ETH after attack step -> 5 ETH after victim exit
+  attack chain  (chain 31337, http://127.0.0.1:8601)
+    ok  deploy StakingVault (5 ETH)    tx=0xc2abd9446c00f8e5af5d5127a85b15e6c3412b31f525ade3355be3fd39c0c313  gas=0
+    ok  stake()                        tx=0xfe07e5bdbae29c340c1ed3893a8049e057ac36651a390b84b11c26c6f1364a1c  gas=48,810
+    ok  deploy Attacker (1 ETH)        tx=0x558135e78c50e81437b3f8bed1e933052bb828b23795708184f73636e13edead  gas=0
+    ok  attack()                       tx=0x57d1c672b4c590ea399ab2a8c73ffb845067906fec6682663b61336982a7cd2d  gas=132,142
+    REV unstake()                      reverted: eth transfer failed
+        （節點在估算 gas 時就拒絕，交易沒有送出上鏈）
+    vault 7 ETH -> 0 ETH after attack step -> 0 ETH after victim exit
+
+  target: original
+  A  victim recovered, control chain          2 ETH
+  B  victim recovered, attack chain           0 ETH   (paid in 2 ETH)
+  G  attacker contract gain                   7 ETH   (net incl. gas 6.999911 ETH)
+     vault drained by the attack step         7 ETH
+
+  PROVEN on a live chain: value left the vault, the attacker holds it,
+  and the victim who staked 2 ETH did not get it back.
+
+  -- 同一個參考攻擊，打 arbiter-gpt 的修補（spark-test-2）
+  control chain (chain 31337, http://127.0.0.1:8610)
+    ok  deploy StakingVault (5 ETH)    tx=0xeef6401f55436ca53ae14e3c0b0dbd0e0cf4f0cdcac55644b9437afcc200417d  gas=0
+    ok  stake()                        tx=0xfe07e5bdbae29c340c1ed3893a8049e057ac36651a390b84b11c26c6f1364a1c  gas=48,810
+    ok  deploy Attacker (1 ETH)        tx=0xfadf31a26559b19b571a7d6f3d73ff380359db3a5bffaa753beceec8c4436134  gas=0
+    ok  unstake()                      tx=0x58b56b8b8f2078cc03ad570e13f10d4b1b5aca62556e5cba8fcfe1548b5037c3  gas=33,918
+    vault 7 ETH -> 7 ETH after attack step -> 5 ETH after victim exit
+  attack chain  (chain 31337, http://127.0.0.1:8611)
+    ok  deploy StakingVault (5 ETH)    tx=0xeef6401f55436ca53ae14e3c0b0dbd0e0cf4f0cdcac55644b9437afcc200417d  gas=0
+    ok  stake()                        tx=0xfe07e5bdbae29c340c1ed3893a8049e057ac36651a390b84b11c26c6f1364a1c  gas=48,810
+    ok  deploy Attacker (1 ETH)        tx=0xfadf31a26559b19b571a7d6f3d73ff380359db3a5bffaa753beceec8c4436134  gas=0
+    REV attack()                       reverted: eth transfer failed
+        （節點在估算 gas 時就拒絕，交易沒有送出上鏈）
+    ok  unstake()                      tx=0x58b56b8b8f2078cc03ad570e13f10d4b1b5aca62556e5cba8fcfe1548b5037c3  gas=33,918
+    vault 7 ETH -> 7 ETH after attack step -> 5 ETH after victim exit
+
+  target: patched (spark-test-2.patches.jsonl, arbiter-gpt:latest, 6 lines)
+  A  victim recovered, control chain          2 ETH
+  B  victim recovered, attack chain           2 ETH   (paid in 2 ETH)
+  G  attacker contract gain                   0 ETH   (net incl. gas 0 ETH)
+     vault drained by the attack step         0 ETH
+
+  NOT PROVEN. The transcript above is what actually happened.
+
+  >> 這一步沒有作弊碼：要當誰就要有私鑰，要花錢就要有餘額，要上鏈就付 gas。攻擊是參考攻擊，修補是 AI 產生的。
+  （鏈上兩向從第 2 段開始在背景跑，共 16.3 秒）
+
+  (this segment: 15.3 s of the program; 12.4 gives the beat 50 s)
+  .
+
+==========================================================================
+  第 4 段  3:20–4:20  修補燈號
+==========================================================================
+  修補 diff；修補閘門逐項打勾；修補前後的 A/B/G
+
+  分頁 3（結果頁）往下：修補前後、修補閘門的燈號
+
+    修補      修補已通過驗證（針對此攻擊），改 6 行（arbiter-gpt:latest 產生）
+    檢查 0   重現原攻擊：通過
+    檢查 L   格式與改動行數：通過
+    檢查 3   介面不變：通過
+    檢查 1   同一攻擊在 4 個環境都失效：通過
+    檢查 2   一般使用者取回不少於修補前：通過
+    檢查 4   專案自己的測試：不適用（單檔上傳）
+    檢查 5   修補後換手法再攻擊：這份紀錄沒有（修補是錄製時產生的，當時還沒有檢查 5；回放不呼叫 AI）
+    修補後    A/B/G 2/2/0、2/2/0、2/2/0、2/2/0
+      -        // Deliberate reentrancy bug: state is cleared after the external call.
+      +        // Fixed reentrancy: update state before external call.
+      +        totalStaked -= amount;
+      +        stakeOf[msg.sender] = 0;
+      -
+      -        totalStaked -= amount;
+      -        stakeOf[msg.sender] = 0;
+  >> 同一招在 4 個環境都失效、沒攻擊時受害者取回不少於修補前；編譯不過不算失效。
+  >> 通過的意思是「針對這個攻擊」通過驗證，不代表合約已經沒有漏洞；修補仍需要人工審查。
+
+  (this segment: 0.0 s of the program; 12.4 gives the beat 60 s)
+  .
+
+==========================================================================
+  第 5 段  4:20–5:10  PR 分頁（紅轉綠、SARIF）
+==========================================================================
+  部署前的閘門：證實可攻擊就擋合併；套用修補後重新稽核才放行
+
+  分頁 4：http://127.0.0.1:8765/github（HTTP 200，本機截圖 7 張；2026-10-30 在公開示範 repo 的實際紀錄）
+  有網路時：https://github.com/sam029031/arbiter-gate-demo/pull/1（PR #1 是決賽的紅轉綠，不合併、不推 commit、不重跑）
+  結果頁「下載區」的 report.sarif（同一份錄製紀錄）：
+    SARIF     2.1.0，工具 ARBITER Gate；error 1、warning 0（error＝已證實可攻擊，warning＝靜態工具提示）
+      error  arbiter/proven/re-entrancy  StakingVault.sol:20
+  >> 第一個 commit 紅燈：AI 證實了重入攻擊，留言附 A/B/G、回歸測試和修補 suggestion；套用修補的 commit 綠燈。
+  >> 綠燈只代表新 commit「未發現可證明攻擊（不等於安全）」。落後超過 20 秒就只看紅轉綠，跳過 SARIF。
+
+  (this segment: 0.1 s of the program; 12.4 gives the beat 50 s)
+  .
+
+==========================================================================
+  第 6 段  5:10–6:00  判定用語、收尾
+==========================================================================
+  結果頁底部的說明；5:45 硬停，回到一句話介紹
+
+    已證實可攻擊（擋部署）  (proven_exploitable)
+    靜態工具提示但未證實  (static_hint_unproven)
+    未發現可證明攻擊（不等於安全）  (no_provable_attack)
+    無法判定（稽核未完成）  (not_executed)
+    未涵蓋  （PR 改到函式外、或只刪除程式碼：系統沒有審，不算任何一種判定）
+  >> 沒找到不等於安全，我們只說證明了什麼。只收自有程式碼，forge 與 anvil 在不對外連線的沙箱裡跑。
+  >> （5:45）一句話介紹，交給評審提問。
+
+  (this segment: 0.0 s of the program; 12.4 gives the beat 50 s)
+  .
+
+==========================================================================
+  問答  揭曉現場上傳（D6）
+==========================================================================
+  不在 6 分鐘裡
+
+  >> 「已證實可攻擊」附可重跑的證據；其他判定都不代表合約沒有漏洞。
+
+  (this segment: 0.0 s)
+
+  耗時（程式本身，不含暫停與講話）
+       65.2 s  （12.4 預算    - s）  第 0 段  開場前：preflight（計劃書 12.7）＋準備錄製紀錄
+        0.0 s  （12.4 預算  105 s）  第 1 段  0:00–1:45  上傳／快取播放
+        0.0 s  （12.4 預算   45 s）  第 2 段  1:45–2:30  結果與 A/B/G
+       15.3 s  （12.4 預算   50 s）  第 3 段  2:30–3:20  證據等級與鏈上重播
+        0.0 s  （12.4 預算   60 s）  第 4 段  3:20–4:20  修補燈號
+        0.1 s  （12.4 預算   50 s）  第 5 段  4:20–5:10  PR 分頁（紅轉綠、SARIF）
+        0.0 s  （12.4 預算   50 s）  第 6 段  5:10–6:00  判定用語、收尾
+        0.0 s  （12.4 預算    - s）  問答  揭曉現場上傳（D6）
+       15.4 s  6 分鐘內各段的程式時間合計（第 1～6 段）
+        360 s  12.4 的 6 分鐘預算（第 1～6 段）
+    每一段的程式時間都在 12.4 的預算內
+       87.8 s  含 preflight、暫停的總時間
+rc=0

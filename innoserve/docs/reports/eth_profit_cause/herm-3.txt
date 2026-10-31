@@ -4,4 +4,4 @@ ARBITER Gate  [file]  run_id=predexp-herm-3  models=arbiter-gpt:latest  LLM requ
     reason: agent_concluded_no_attack
 
 exit code 0
-gate.json: /home/sam/innoserve/reports/eth_profit_cause/gate_herm-3.json
+gate.json: ~/innoserve/reports/eth_profit_cause/gate_herm-3.json

@@ -4,4 +4,4 @@ ARBITER Gate  [file]  run_id=modetrial-repo-1  models=arbiter-gpt:latest  LLM re
     reason: agent_concluded_no_attack
 
 exit code 0
-gate.json: /home/sam/innoserve/reports/mode_repo_trial/gate_repo-1.json
+gate.json: ~/innoserve/reports/mode_repo_trial/gate_repo-1.json

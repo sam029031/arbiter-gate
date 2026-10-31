@@ -8,4 +8,4 @@ ARBITER Gate  [file]  run_id=predexp-herm-2  models=arbiter-gpt:latest  LLM requ
     patch: 未產生修補
 
 exit code 1
-gate.json: /home/sam/innoserve/reports/eth_profit_cause/gate_herm-2.json
+gate.json: ~/innoserve/reports/eth_profit_cause/gate_herm-2.json

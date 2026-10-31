@@ -16,7 +16,7 @@
  "files": [
   {
    "id": "examples::StakingVault",
-   "path": "/home/sam/innoserve/arbiter-audit/arbiter/examples/StakingVault.sol",
+   "path": "~/innoserve/arbiter-audit/arbiter/examples/StakingVault.sol",
    "verdict": "proven_exploitable",
    "label": "已證實可攻擊（擋部署）",
    "reason": "finding_submitted",

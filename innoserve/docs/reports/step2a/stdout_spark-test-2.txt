@@ -27,4 +27,4 @@ ARBITER Gate  [from_results]  run_id=spark-test-2  models=arbiter-gpt:latest  LL
        }
 
 exit code 1
-gate.json: /home/sam/innoserve/reports/step2a/gate_spark-test-2.json
+gate.json: ~/innoserve/reports/step2a/gate_spark-test-2.json

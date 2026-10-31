@@ -1,0 +1,100 @@
+{
+ "schema": "arbiter-gate/0.1",
+ "generated_at": "2026-10-30T12:23:06+0800",
+ "input": {
+  "mode": "file",
+  "file": "examples/StakingVault.sol",
+  "run_id": "p6-cycle-2",
+  "workspace_mode": "repo",
+  "llm_requests_this_invocation": 12,
+  "usage": {
+   "requests": 12,
+   "prompt_tokens": 180462,
+   "completion_tokens": 13441,
+   "cost_usd": 0.0,
+   "retries": 1,
+   "http_errors": 1,
+   "parse_failures": 0,
+   "reasoning_recoveries": 11,
+   "system_fingerprints": [
+    "fp_ollama"
+   ],
+   "models_seen": [
+    "arbiter-gpt:latest"
+   ]
+  },
+  "results": "runs/gate/p6-cycle-2/p6-cycle-2.results.jsonl",
+  "llm_requests_audit": 12,
+  "llm_requests_repair": 0,
+  "sandbox": {
+   "status": "on",
+   "image": "arbiter-sandbox:p3",
+   "container_start_s": 0.31,
+   "memory_peak_bytes": 35180544,
+   "network": "none",
+   "env": "PATH only",
+   "dep_cache": {
+    "ok": true,
+    "files": 2405
+   }
+  }
+ },
+ "models": [
+  "arbiter-gpt:latest"
+ ],
+ "patches_file": null,
+ "repair": true,
+ "exit_code": 0,
+ "files": [
+  {
+   "id": "file::StakingVault",
+   "path": "runs/gate/p6-cycle-2/examples/StakingVault.sol",
+   "artifact": {
+    "uri": "StakingVault.sol",
+    "sha256": "77c8b55471f4790dd114767722ca3d47fdbde3d11311a1e21275ce097b1baa08"
+   },
+   "verdict": "static_hint_unproven",
+   "label": "靜態工具提示但未證實",
+   "reason": "agent_concluded_no_attack",
+   "detail": "",
+   "turns": 12,
+   "elapsed_s": 396.92,
+   "static_analysis": {
+    "status": "ran",
+    "label": "",
+    "reason": "",
+    "tool": "slither 0.11.6",
+    "solc": "0.8.20",
+    "threshold": "impact ≥ Medium 且 confidence ≥ Medium",
+    "findings_total": 4,
+    "hints": [
+     {
+      "check": "reentrancy-eth",
+      "impact": "High",
+      "confidence": "Medium",
+      "line": 20,
+      "end_line": 30,
+      "function": "unstake",
+      "message": "Reentrancy in StakingVault.unstake() (StakingVault.sol#20-30):"
+     }
+    ]
+   },
+   "fixture_note": "",
+   "static_hints": [
+    {
+     "check": "reentrancy-eth",
+     "impact": "High",
+     "confidence": "Medium",
+     "line": 20,
+     "end_line": 30,
+     "function": "unstake",
+     "message": "Reentrancy in StakingVault.unstake() (StakingVault.sol#20-30):"
+    }
+   ],
+   "hint_note": "這是自動掃描工具的提示，系統沒有證實它真的能被攻擊。",
+   "findings": []
+  }
+ ],
+ "elapsed_s": 398.12,
+ "note": "已證實可攻擊的判定附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。"
+}

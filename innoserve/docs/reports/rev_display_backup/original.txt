@@ -22,4 +22,4 @@
   PROVEN on a live chain: value left the vault, the attacker holds it,
   and the victim who staked 2 ETH did not get it back.
 
-  transcript: /home/sam/innoserve/reports/rev_display_backup/original.json
+  transcript: ~/innoserve/reports/rev_display_backup/original.json

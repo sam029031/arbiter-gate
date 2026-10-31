@@ -7,4 +7,4 @@ ARBITER Gate  [file]  run_id=gate-StakingVault-20261028-182059-747e83  models=ar
     patch: 未產生修補
 
 exit code 1
-gate.json: /home/sam/innoserve/reports/step2a/gate_live.json
+gate.json: ~/innoserve/reports/step2a/gate_live.json

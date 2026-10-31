@@ -30,4 +30,4 @@ ARBITER Gate  [file]  run_id=modetrial-repo-2  models=arbiter-gpt:latest  LLM re
        }
 
 exit code 1
-gate.json: /home/sam/innoserve/reports/mode_repo_trial/gate_repo-2.json
+gate.json: ~/innoserve/reports/mode_repo_trial/gate_repo-2.json

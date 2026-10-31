@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Run one toolchain command inside the current job's sandbox container.
+#
+#   service/bin/forge|anvil|cast|slither -> _sandbox_exec <tool> <args...>
+#
+# The container comes from $ARBITER_SANDBOX_CONTAINER (set by arbiter/sandbox.py for the
+# job). With no container this REFUSES (exit 126): it never falls back to the host tool.
+# Inside, the command runs under `env -i PATH=...` -- the caller's environment, keys
+# included, is not passed -- and under `timeout`, so a call whose caller was SIGKILLed
+# (Python's subprocess timeout) still ends. SIGTERM/SIGINT are forwarded (anvil is stopped
+# with terminate()). forge must be called from inside the job directory; the other tools
+# run there regardless of the caller's cwd.
+set -u
+tool="$1"; shift
+C="${ARBITER_SANDBOX_CONTAINER:-}"
+J="${ARBITER_SANDBOX_JOB_DIR:-}"
+if [ -z "$C" ] || [ -z "$J" ]; then
+    echo "arbiter sandbox: no job container for '$tool'; refusing to run it on the host" >&2
+    exit 126
+fi
+jd="$(cd "$J" 2>/dev/null && pwd -P)" || { echo "arbiter sandbox: job directory missing" >&2; exit 126; }
+cwd="$(pwd -P)"
+case "$cwd/" in
+    "$jd"/*) wd="$cwd" ;;
+    *) if [ "$tool" = forge ]; then
+           echo "arbiter sandbox: forge called from outside the job directory" >&2; exit 126
+       fi
+       wd="$jd" ;;
+esac
+cap="${ARBITER_SANDBOX_CALL_TIMEOUT:-600}"
+[ "$tool" = anvil ] && cap="${ARBITER_SANDBOX_JOB_MAX:-1800}"
+# Slither is handed forge's solc by its host path (~/.svm/...); the image has the same
+# binaries (sha256-checked) under /opt/svm.
+args=()
+for a in "$@"; do args+=("${a//$HOME\/.svm\//\/opt\/svm\/}"); done
+id="$$-$RANDOM"
+docker exec -i -w "$wd" "$C" sh -c 'echo $$ > "/tmp/arb.'"$id"'.pid"; exec env -i PATH=/usr/local/bin:/opt/slither/bin:/usr/bin:/bin timeout -k 5 "$0" "$@"' \
+    "$cap" "$tool" "${args[@]}" &
+pid=$!
+forward() {
+    docker exec "$C" sh -c 'kill -TERM "$(cat /tmp/arb.'"$id"'.pid)" 2>/dev/null' >/dev/null 2>&1
+    kill -TERM "$pid" 2>/dev/null
+}
+trap forward TERM INT
+wait "$pid"; rc=$?
+while kill -0 "$pid" 2>/dev/null; do wait "$pid"; rc=$?; done
+exit "$rc"

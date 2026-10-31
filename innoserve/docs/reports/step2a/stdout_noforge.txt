@@ -4,4 +4,4 @@ ARBITER Gate  [file]  run_id=gate-StakingVault-20261028-182039-faf2fd  models=ar
     reason: toolchain_unavailable: forge not found on PATH
 
 exit code 2
-gate.json: /home/sam/innoserve/reports/step2a/gate_noforge.json
+gate.json: ~/innoserve/reports/step2a/gate_noforge.json
