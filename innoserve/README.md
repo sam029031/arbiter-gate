@@ -118,10 +118,10 @@ ARBITER Gate 是放在智慧合約**部署前**的證據閘門。AI 寫攻擊，
 
 | 路徑 | 內容 |
 |---|---|
-| `innoserve/docs/CLAUDE.md` | 交接文件。第 7 節是本機進度、使用者的決定（D1～D27）與已知陷阱 |
+| `innoserve/docs/CLAUDE.md` | 交接文件。第 7 節是本機進度、使用者的決定（D1～D28）與已知陷阱 |
 | `innoserve/docs/DEMO_RUNBOOK.md` | 決賽 demo 一頁說明：preflight、6 分鐘每段要說的話、備援、實測耗時 |
 | `innoserve/docs/reports/` | 每一步的報告與原始輸出（截圖、gate.json、鏈上 transcript、Actions log） |
-| `innoserve/demo_runs/` | 預錄 demo 素材：spark-test-1～5 的 results／ledger，加上 2～4 的 patches（arbiter-gpt，2026-10-28） |
+| `innoserve/demo_runs/` | 預錄 demo 素材：spark-test-1～5 的 results／ledger，加上 2～4 的 patches（arbiter-gpt，2026-10-28）；`spark-test-2.recorded.json` 是錄製回放橫幅的日期說明（紀錄本身沒有記時間，日期的出處寫在檔裡；D28） |
 | `innoserve/eval/arbitergpt-v3/` | 40 份評測的原始資料（見上一節） |
 | `innoserve/media/` | 程式地圖與評審 QA（PDF）、demo 動畫與操作教學影片（MP4＋SRT 字幕） |
 
@@ -153,7 +153,7 @@ scripts/demo_gate.sh --auto --no-smoke       # 決賽流程：preflight → 6 �
 
 ## 歷史說明
 
-- **這個 repo 只放快照，不含開發歷史。** 每個 commit 都是一份完整快照（e88e4d1 是 10/29 的版本，之後的 commit 是決賽版；tag `v1` 是決賽版，GitHub Action 引用它）。完整歷史（AIS3 時期到決賽版）放在私人 repo，評審需要時可以邀請檢視。
+- **這個 repo 只放快照，不含開發歷史。** 每個 commit 都是一份完整快照（e88e4d1 是 10/29 的版本；5ca3d98 是決賽版，tag `v1` 指向它，GitHub Action 引用它；之後的 commit 只修錄製回放橫幅的日期：`arbiter/arbiter/jobs.py`、一支測試 `arbiter/scripts/playback_date_probe.py` 和 `demo_runs/spark-test-2.recorded.json`，加上文件更新）。完整歷史（AIS3 時期到決賽版）放在私人 repo，評審需要時可以邀請檢視。
 - 文件和報告裡引用的 commit hash（例如 d09b90f、2c26f68）都在那份完整歷史裡，本 repo 查不到。InnoServe 的起點 ead58ae 例外，它在公開的 yeee3642/arbiter-audit 上。
 - **AIS3 gateway 金鑰**：AIS3 時期有幾個早期 commit 的訊息提到 AIS3 gateway 金鑰外洩。該金鑰已經輪替，歷史中所有的值都已遮蔽為 `REDACTED`。本快照不含那些 commit。
 - **Bastet 提示原文**：AIS3 時期曾使用 Bastet 的 detector 提示原文，依 Apache-2.0 授權，出處見根目錄的 `NOTICE`。本快照不含那些提示檔：`arbiter/arbiter/bastet_arm.py` 在執行時，才從 repo 外的資料夾讀取提示。

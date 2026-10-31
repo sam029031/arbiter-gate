@@ -187,6 +187,10 @@ python3 scripts/live_attack.py --patched   # 修補後攻擊 revert
 - **D27 公開快照的 `innoserve/docs/CLAUDE.md` 換成最新版（含 P9）**，私人 repo 的名稱和網址一律遮成「私人 repo」：**整個公開快照不能出現私人 repo 的名稱**。
   P9 報告遮蔽後放進 docs/reports；`fullplan_p9/` 裡的 scan_*.txt 不放。
 - B3（關公開 repo 的 Actions）和在示範 repo 的允許清單加 `sam029031/arbiter-gate/*` 由使用者自己在 GitHub 設定做；B5、B6 等使用者說「設定好了」再下指示。
+  → **10/31 使用者已設定**（公開 repo Actions enabled=false；示範 repo 允許清單有 `sam029031/arbiter-gate/*`），B5、B6 已做，見「P9 階段 B-3」。
+- **D28（10/31，看過 B-1 報告後）錄製回放橫幅的日期改成從紀錄本身讀**，不再用檔案修改時間（jobs.py:251）；紀錄裡沒有時間欄位就停下來回報，不猜、不寫死。
+  → **B-2 停在第 1 步**：回放讀的紀錄（results／ledger／patches，本機另有 summary／input）**都沒有時間欄位**，run.py、gateway.py 本來就不寫時間。
+  → **使用者選 (甲)（10/31）**：`runs/spark-test-2.recorded.json` 寫 `recorded_on: 2026-10-28`，`source` 照實寫出處（檔案修改時間 2026-10-28 17:39:49、10/28 22:24 第一次備份的 tar 裡已有這個檔），不寫成紀錄本身記的；jobs.py 有這個檔就讀 recorded_on，沒有就照舊用檔案修改時間。**之後程式凍結。**
 
 ### 段落表（預定日期）
 | 段 | 內容 | 預定 | 狀態 |
@@ -201,7 +205,7 @@ python3 scripts/live_attack.py --patched   # 修補後攻擊 revert
 | P5 | GitHub PR 整合 | 11/3 | **完成** b318c16（10/30，`reports/fullplan_p5_2026-10-30.md`；demo repo PR #6 已於 10/30 合併） |
 | P6 | Foundry 專案修補＋檢查 4、5 | 11/4 | **完成** 3d318b9（10/30，`reports/fullplan_p6_2026-10-30.md`） |
 | P8 | 可靠度測試 | 11/4 晚 | **10/30 晚做完**（`reports/reliability_final_2026-10-30.md`）：主設定與較少回合數各 10 次，12.4 的 5 個條件都 0 個成立 → **從 0:00 用快取**；low 跳過（D19） |
-| P9 | 收尾 | 11/5 | **階段 A 完成**（10/31 01:0x，commit 6af51f2，`reports/fullplan_p9_2026-10-31.md`）：demo_gate.sh／runbook 完整版流程、首頁清理 15 筆、公開快照與私人 main 在本機組好、第四次備份；**沒有推送**。階段 B（推送）待使用者看報告後指示；0:00 快取、首頁剩餘 15 筆、公開 repo 歷史處理待決定 |
+| P9 | 收尾 | 11/5 | **階段 A 完成**（10/31 01:0x，commit 6af51f2，`reports/fullplan_p9_2026-10-31.md`）；**階段 B-1 完成**（10/31 10:2x，`reports/fullplan_p9b_2026-10-31.md`）：公開 repo main＝5ca3d98＋tag v1、私人 repo main＝0e235cb＋tag eval-freeze 已推送；B3 與示範 repo 允許清單已由使用者設定；**B-2（D28）停在第 1 步**（紀錄沒有時間欄位，`reports/fullplan_p9b2_2026-10-31.md`）；**B-3 完成**（10/31 11:5x，`reports/fullplan_p9b3_2026-10-31.md`）：示範 repo PR #8（workflow 改用 action@v1）已合併、PR #9 測試經 v1 擋下 |
 評測夜跑：10/29 r1、**10/29 夜 r2（改排，N=2）、10/30 14:19 r3（提前，原訂 20:30）**（最初原訂 10/30 r2、10/31 r3）。
 
 ### P0 環境（10/29，報告 `~/innoserve/reports/fullplan_p0_2026-10-29.md`）
@@ -491,6 +495,83 @@ python3 scripts/live_attack.py --patched   # 修補後攻擊 revert
 - DGX 請求 4 次（全是 api_smoke）。收尾時誤下一次 `git ls-remote`（唯讀，沒推送），報告第 9 節照實記。
 - **階段 B 清單**：報告第 7 節 B1～B6（公開 main＋tag v1、公開 repo Actions、私人 main、demo workflow PR、測試 PR）。
 
+### P9 階段 B-1（10/31 10:1x～10:3x，報告 `~/innoserve/reports/fullplan_p9b_2026-10-31.md`）——推送公開 repo 與私人 repo
+- **推送了**（都是快轉或新 tag，沒有 force push；推送前用 ls-remote 讀遠端 ref 確認，推送後再讀一次，hash 都對）：
+  · 公開 `sam029031/arbiter-gate`：main e88e4d1 → **5ca3d98**、annotated tag **v1**（tag 物件 d6449a7 → 5ca3d98）。
+  · 私人 repo：main 3b1442c → **0e235cb**、tag **eval-freeze**（1c7f896）。
+  · 沒推：p9-single、p9-stageA-local、ais3/*、demo-v1 與其他 tag。沒有 gh 指令、沒有動 GitHub 設定、示範 repo 和 PR #1 沒碰。DGX 請求 0。
+- **和指示不同（已問使用者）**：本來在 929c043 後面加了 460f9f5，但 **929c043 的舊版 docs/CLAUDE.md 有 1 處私人 repo 網址**，快轉推送會進公開歷史（違反 D27）。
+  使用者選「改接 e88e4d1」：同一棵樹 f508a7a 做成 **5ca3d98**（parent e88e4d1）。929c043→460f9f5 留在本機分支 `p9-stageA-local`，沒刪。
+- 新 commit 的內容：docs/CLAUDE.md 換成最新版（含 D23～D27、P9 階段 A；不含這一節）、P9 階段 A 報告＋`fullplan_p9/` 14 個檔（scan_*.txt 4 個不放）、README 4 處（D1～D27、遮蔽說明、歷史說明改成「只放快照、每個 commit 是一份完整快照」）。
+- 遮蔽工具（`~/innoserve/release/tools/`）：sanitize.py 加私人 repo 名稱／網址 →「私人 repo」；後面不接 `/` 的家目錄名稱（文字裡提到的那個字串，不是路徑）改成 `/home/<使用者>`（原本變 `~` 會失去意思）。pubscan.py 加規則 `private_repo_name`。階段 A 版另存 `*.p9a.py`。
+- 掃描（`reports/fullplan_p9b/scan_460f9f5*.txt`，樹＝推上去的 f508a7a）：DGX 位址／帳號、金鑰、`/home/<使用者>`、`/mnt/c/Users/<user>`、隊友與學校 email、扣留 7 份 sha256（137,144 變體）、私人 repo 名稱 **全部 0**。e88e4d1（已公開）的 `/home/<使用者>` 照 D25 只記錄。
+- 從 GitHub 乾淨 clone v1（/tmp）照 README：sha256 **16 OK／8 FAILED**（agent.py、tools.py OK；表格 24 列 0 不符）、victim 4/4、**patch_probe 5/5**、**`demo_gate.sh --auto --no-smoke` rc 0**（第 2 階、方案 e 兩向、SARIF error 1，0 個 LLM 請求）。網頁 server 10:32:20 重開（pid 680186）。
+- **發現（沒修，待使用者決定）**：錄製回放橫幅的日期取 `runs/spark-test-2.results.jsonl` 的**檔案修改時間**（jobs.py:251），乾淨 clone 會顯示 clone 當天（階段 A 的兩次 clone 也是）。
+  **決賽筆電不受影響**（本機檔案是 10/28 17:39:49，顯示 2026-10-28），但**上台前不要 touch 或不帶 `-p` 複製這個檔**。選項：README 加 `touch -d`／改 jobs.py（要先問）／不處理。
+- arbiter-audit 這段沒有改動（innoserve-gate 仍是 6af51f2、status 0 行），所以**沒有 commit**；agent.py 0 行、tools.py 和 innoserve-base 相同、workspace.py +17／−2、gateway.py 和 a461776 相同。
+- 陷阱：`pgrep -f gptoss-v3` 寫在同一個 bash 指令裡會比對到自己（印出 yes）；用 `pgrep -af 'gptoss-v[3]'` 並排除自己的 shell。
+- **第五次備份**：`…/ARBITER_backup/20261031_103448/`（和前四份同一層，沒刪任何東西；arbiter-audit／私人 release／公開 release 三個 bundle＋innoserve-materials.tar.gz，tar 加了 `release/tools/`；tar sha256 212c01c5…ef8f4a、bundle bb177a0b…dfbce0（和第四次相同，arbiter-audit 沒有新 commit）；`sha256sum -c` 4 個 OK、bundle verify 3 個 okay、clone patch_probe 5/5；見該資料夾的 RESTORE.md）
+- **接下來由使用者做**：B3（要不要關公開 repo 的 Actions）、在示範 repo 的允許清單加 `sam029031/arbiter-gate/*`；說「設定好了」之後再下 B5、B6 的指示。
+
+### P9 階段 B-2（10/31 11:3x～11:4x，報告 `~/innoserve/reports/fullplan_p9b2_2026-10-31.md`）——停在第 1 步
+- D28 要錄製回放的日期從紀錄本身讀。查了回放會讀的 `runs/spark-test-2.{results,ledger,patches}.jsonl`（本機另有 summary.json、input.json）：
+  - 時間欄位 0 個；內容裡的日期字串和 epoch 數字都是 0；
+  - 寫紀錄的 run.py、gateway.py 本來就不寫時間；
+  - ledger 只有每個請求的 `elapsed_s`。
+  - 原始輸出：`reports/fullplan_p9b2/record_fields.txt`。
+- 有日期、但不是紀錄本身的來源（沒用）：
+  - 檔案修改時間 2026-10-28 17:39:49，10/28 22:24 第一次備份的 tar 也是這個時間；
+  - 最早一份結果頁 `runs/gate/web/9732d4c34068.gate.json` 的 `generated_at` 是 10/28 18:31:00，那是重跑結果頁的時間；
+  - 10/28 的報告。
+- 照指示停下：jobs.py、webui.py 沒改，沒有 commit、推送、clone、第六次備份。DGX 0 次、GitHub 0 次。
+- **待使用者選**（報告第 4 節），建議決賽前選 (丁) 或 (乙)：
+  - (甲) 加說明檔 `spark-test-2.recorded.json`，jobs.py 有這個檔就讀它；
+  - (乙) README 加 `touch -d`；
+  - (丙) 紀錄裡沒有日期時，橫幅照實寫「沒有記在紀錄裡」，決賽筆電的畫面也會變；
+  - (丁) 不處理。
+
+### P9 階段 B-2 續（10/31 12:0x～，使用者選 (甲)，**commit 66a8f21**，報告接在 `~/innoserve/reports/fullplan_p9b2_2026-10-31.md` 後面）
+- `runs/spark-test-2.recorded.json`（runs/ 不在 git；release 快照放在 `innoserve/demo_runs/`）：`recorded_on` 2026-10-28。
+  - `source` 照實寫：紀錄本身沒有記時間；日期取自錄製那台電腦上結果檔的修改時間 2026-10-28 17:39:49，以及 10/28 22:24 第一次備份的 tar 裡已有這個檔。
+- jobs.py 新增 `recorded_date()`：有說明檔、而且 `recorded_on` 是 YYYY-MM-DD 就用它；沒有或格式不對，就照舊用結果檔的修改時間。
+- `scripts/playback_date_probe.py` **6/6**（不送 LLM 請求，只複製素材到暫存資料夾，runs/ 的修改時間不動）：
+  - 有說明檔：2026-10-28；
+  - 結果檔修改時間改成 11/15，仍然是 2026-10-28；
+  - 拿掉說明檔，退回修改時間（11/15）；
+  - 格式不對的說明檔 4 種，都退回修改時間；
+  - 時間軸其他內容不變；
+  - spark-test-3（沒有說明檔）照舊用修改時間。
+  - 同一支測試對改動前的 jobs.py 是 5/6，抓得到這個問題。
+- 完整檢查全過（DGX 0）：
+  - 所有模型端點指向關著的本機埠；
+  - sandbox_assertions 1～6 逐條跑，第 7 條會送 api_smoke，沒跑；
+  - `demo_gate.sh --auto --no-smoke` rc 0，橫幅「錄製回放：2026-10-28」。
+- 網頁 server 12:12:28 重開（pid 691657）。**這之後程式凍結。**
+
+### P9 階段 B-3（10/31 11:41～11:51，報告 `~/innoserve/reports/fullplan_p9b3_2026-10-31.md`）——示範 repo 改用 action@v1（B5、B6）
+- 前置確認：
+  - runner online、閒置；
+  - 示範 repo 的允許清單有 `sam029031/arbiter-gate/*`；公開 repo 的 Actions 是 enabled=false；
+  - 示範 repo main 12c7c17；main 的必要檢查綁 app 15368。
+- **B5，PR #8**（分支 `ci/action-v1`，commit f91d8fe）：
+  - 套用 `fullplan_p9/demo_repo_workflow.diff`，只改 `uses:` 和註解。
+  - 檢查時下載的是 `sam029031/arbiter-gate@v1 (SHA:5ca3d98)`，所以公開 repo 關掉 Actions 不影響別的 repo 引用。
+  - 沒改到 .sol → 放行（exit 0）、沒有留言、0 個請求。
+  - **已合併**：11:44:53，merge commit **5eee2e5**。示範 repo 自己的 action.yml 保留。
+- **B6，PR #9**（分支 `test/p9-action-v1`，commit b66fbed，從 5eee2e5 開）：
+  - 內容和 PR #1 第一個 commit、PR #7 相同；專案 `forge test` 3/3。
+  - 事先定的規則：最多 4 次，第一次擋下就停。
+  - **經 v1 檢查 1 次中 1 次擋下**：exit 1，PR BLOCKED；code scanning alert #3（error，`src/StakingVault.sol:28`）；留言已貼。
+  - 耗時 2 分 46 秒，**5 個請求**，沙箱 on。
+  - **這次是 eth_profit（寬鬆謂詞）證實**，所以沒有修補、沒有 A/B/G、沒有回歸測試，檢查 4、5 也沒跑。修補路徑經 v1 這次沒有實測；要不要在 PR #9 重跑，待使用者決定。
+  - 跑完已關閉、沒有合併，分支保留。
+- 公開 log 掃描（PR #8 log、PR #9 log、PR #9 留言）：`/home/`、DGX、金鑰、email、私人 repo 名稱全部 0。
+  - pubscan 的 email 規則每份 log 命中 2 筆，是 actions/checkout 設定的 git SSH 網址改寫（insteadOf），不是 email；PR #7 的 log 也有。
+- PR #1 沒碰（head 32077c5，updated_at 10/30 沒變，沒有新 run）。PR #8 合併沒有觸發其他 PR 的 run。
+- **DGX 請求 6 次**：api_smoke 1、PR #9 稽核 5。
+- arbiter-audit 沒有改動（6af51f2），沒有 commit。
+- 本機 `release/arbiter-gate-demo` 在分支 test/p9-action-v1。
+
 ### 已完成
 - 環境：WSL2 Ubuntu、Python 3.14.4（不是 3.11，目前相容）、Foundry 已裝。
   victim_probe.py 4/4 as expected；live_attack.py PROVEN；live_attack.py --patched NOT PROVEN。
@@ -657,7 +738,8 @@ python3 scripts/live_attack.py --patched   # 修補後攻擊 revert
     docs 有 `/mnt/c/Users/<user>/…`；commit 作者 4 個身分（含隊友個人 email）要徵得同意。
 
 ### 保留的素材（不要刪、不要 commit）
-- **第四次本機備份（2026-10-31 00:56，P9 階段 A，最新）**：`…/ARBITER_backup/20261031_005648/`（arbiter-audit.bundle：innoserve-gate 6af51f2；tar 含 runs/、eval-worktree runs、runs_archive/（2026-10-28＋2026-10-31）、reports/、release_staging/、CLAUDE.md（P9 之前）、DEMO_RUNBOOK.md；另含 release 私人／公開兩個 bundle；見 RESTORE.md）。
+- **第五次本機備份（2026-10-31 10:34，P9 階段 B-1，最新）**：`…/ARBITER_backup/20261031_103448/`（arbiter-audit.bundle：innoserve-gate 6af51f2；release 私人 bundle：main 0e235cb＋tag eval-freeze；release 公開 bundle：main 5ca3d98、tag v1、p9-stageA-local、p9-single；tar 含 runs/、eval-worktree runs、runs_archive/、reports/（含 fullplan_p9b）、release_staging/、release/tools/、CLAUDE.md（含 B-1 一節）、DEMO_RUNBOOK.md；見 RESTORE.md）。
+- **第四次本機備份（2026-10-31 00:56，P9 階段 A）**：`…/ARBITER_backup/20261031_005648/`（arbiter-audit.bundle：innoserve-gate 6af51f2；tar 含 runs/、eval-worktree runs、runs_archive/（2026-10-28＋2026-10-31）、reports/、release_staging/、CLAUDE.md（P9 之前）、DEMO_RUNBOOK.md；另含 release 私人／公開兩個 bundle；見 RESTORE.md）。
 - **runs_archive（2026-10-31 搬出）**：`~/innoserve/runs_archive/2026-10-31/runs/gate/` 放 P8 的 15 個資料夾（主設定第 1、2、7、10 次、較少回合數 10 次、p8-lowcheck），沒有刪。
 - **release/tools**：`~/innoserve/release/tools/pubscan.py`（公開前掃描）、`sanitize.py`（遮蔽；本身含要遮蔽的字串，不要放進任何 repo 或 reports）。
 - **第三次本機備份（2026-10-30 23:37，D22）**：`…/ARBITER_backup/20261030_233732/`（bundle：innoserve-gate HEAD 2c26f68；tar 含 runs/、eval-worktree 評測結果、runs_archive/、reports/、release_staging/、CLAUDE.md、DEMO_RUNBOOK.md；sha256 與還原步驟見該資料夾的 RESTORE.md）。10/28 兩份保留。
@@ -717,6 +799,8 @@ python3 scripts/live_attack.py --patched   # 修補後攻擊 revert
     sha256sum -c 21 OK／3 FAILED（gateway.py、workspace.py、cli.py，與 README 預期相同）。
   - 本機：`~/innoserve/release/arbiter-gate/`（完整，remote＝私人 repo；ais3/* 分支與其他 tag 只在本機）、`~/innoserve/release/arbiter-gate-public/`（remote＝公開 repo）。
   - arbiter-audit 沒動（remote 仍是 yeee3642）。之後 arbiter-audit 有新 commit 時，兩個 repo 都不會自動更新。
+  - **10/31 P9 階段 B-1 已更新**：公開 main＝**5ca3d98**（parent e88e4d1）＋tag **v1**；私人 main＝**0e235cb**＋tag **eval-freeze**。見「P9 階段 B-1」一節。
+  - **10/31 P9 階段 B-3**：公開 repo 的 Actions 已由使用者關閉（不影響別的 repo 引用它的 action）；示範 repo main＝**5eee2e5**（PR #8 合併，workflow 用 `sam029031/arbiter-gate/.github/actions/arbiter-gate@v1`）。
 - 決賽前：排練產生的網頁上傳（runs/gate/gate-StakingVault-*）上台前再搬到 runs_archive；之後 runs/ 或 runs_archive/ 有新素材時照第二次備份的做法重新備份（tar 含 runs_archive/）。
 - 11/3 可靠度測試 10 次（決賽 demo 備援，計劃 12、13）：victim_loss 與非 strict、hermetic 與 repo 分開統計，並記錄耗時；
   可直接用 `scripts/demo_gate.sh --auto --live --live-upload --timings F` 連跑，順便量整套流程。上台前再完整排練一次（有人講話、計時）。

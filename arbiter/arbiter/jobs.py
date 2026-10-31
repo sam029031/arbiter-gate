@@ -12,8 +12,9 @@ Kinds:
                  rebuilt from what was recorded (results trace, ledger timings, the
                  order of PoCs) and shown at 1x or 4x, marked as a recording; then
                  `gate --from-results --patches` re-runs A/B/G, the patch checks and
-                 the evidence ladder with forge, live
-  chain          scripts/live_attack_stakingvault.py on the original contract and on
+                 the evidence ladder with forge, live; the banner's date comes from
+                 <run>.recorded.json when there is one, else the results file's mtime
+  chain         scripts/live_attack_stakingvault.py on the original contract and on
                  the spark-test-2 patch: the reference attack on a local chain
 """
 
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -248,8 +250,23 @@ def recorded_timeline(results: Path) -> dict[str, Any]:
                      "elapsed_s": row.get("elapsed_s")}))
     return {"timeline": tl, "notes": notes, "row": row,
             "model": (ledger[0].get("model_served") if ledger else None),
-            "recorded_on": time.strftime("%Y-%m-%d", time.localtime(results.stat().st_mtime)),
+            "recorded_on": recorded_date(results),
             "recorded_elapsed_s": row.get("elapsed_s")}
+
+
+def recorded_date(results: Path) -> str:
+    """The day shown in the playback banner. A results file records no time of its own, so
+    a note next to it (<run>.recorded.json: "recorded_on", and the "source" that day was
+    taken from) comes first; without one, the results file's mtime, which a clone or a
+    copy without -p turns into the day of the copy."""
+    note = results.with_name(results.name.replace(".results.jsonl", ".recorded.json"))
+    try:
+        day = json.loads(note.read_text(encoding="utf-8")).get("recorded_on")
+    except (OSError, ValueError, AttributeError):
+        day = None
+    if isinstance(day, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        return day
+    return time.strftime("%Y-%m-%d", time.localtime(results.stat().st_mtime))
 
 
 def recorded_patch(patches: Path | None) -> dict[str, Any] | None:
