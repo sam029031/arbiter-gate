@@ -58,9 +58,12 @@ patches the same way.
 
 A patch from --repair goes through checks 0, L, 3, 1, 2 and -- in a project -- 4 (the
 project's own `forge test`, nothing that passed may fail). Then check 5 (`--reattack
-on`, the default): the patched contract is audited again with the hypotheses already
-used ruled out; a new proven attack rejects the patch and feeds the next round, at most
-two defences. gate.json carries every round in `patch.timeline`.
+on`, the default): the patched contract is audited again, briefed with the diff and the
+traced mechanism of every attack proven so far; a new proven attack rejects the patch and
+feeds the next round, at most two defences. Check 5 passes only if one of the
+re-attack's exploits was a different technique by its trace (`patch.reattack.attempts`,
+`novel`); otherwise it is "not_diverse". gate.json carries every round in
+`patch.timeline`.
 """
 
 from __future__ import annotations
@@ -70,8 +73,10 @@ import contextlib
 import difflib
 import hashlib
 import json
+import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 import uuid
@@ -82,8 +87,10 @@ from .dump import regression_unavailable_reason, write_regression
 from .repo import SKIP_DIRS
 from .patch import MAX_DEFENSES, TARGET_PATH, exploit_from_row, repair, reproduce, verify_fix
 from .tools import STRICT_PREDICATES
+from .units import WEI, format_amount, unit_name
 from . import progress, sandbox
 from .progress import EV_PROXY as EV
+from .solc_avail import explain_missing, explain_pragma
 from .static_hints import HINT_NOTE, NOT_RUN_LABEL, run_slither
 from .verdict import LABELS, NOT_EXECUTED, PROVEN, STATIC_HINT, classify, with_static_hints, worst_exit
 from .workspace import VICTIM_ENVIRONMENTS, Workspace
@@ -265,8 +272,14 @@ def _environments(abg: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     rows = []
     for i, (endow, warp, rounds) in enumerate(VICTIM_ENVIRONMENTS):
         m = next((r for r in abg or [] if r["env"] == i), {})
-        rows.append({"env": i, "endow_wei": endow, "warp_s": warp, "rounds": rounds,
-                     "A": m.get("A"), "B": m.get("B"), "G": m.get("G")})
+        row = {"env": i, "endow_wei": endow, "warp_s": warp, "rounds": rounds,
+               "A": m.get("A"), "B": m.get("B"), "G": m.get("G"),
+               # What A/B/G (and TA/TB) are counted in: "wei", or a token and its decimals.
+               "unit": m.get("unit", WEI)}
+        if "TA" in m:
+            # The owner's claim (treasury_exit) without / with the attack.
+            row["TA"], row["TB"] = m.get("TA"), m.get("TB")
+        rows.append(row)
     return rows
 
 
@@ -302,12 +315,35 @@ def _on_propose(k: int) -> None:
 def _on_attack(ev: dict[str, Any]) -> None:
     if ev.get("phase") == "start":
         EV.stage("repair", f"第 {ev['round']} 回合：修補通過檢查了，AI 換一種手法再攻擊修補後的合約"
-                             "（不能用之前用過的攻擊假設）")
+                             "（系統會比對每個攻擊的執行軌跡，同一手法換個寫法不算）")
         EV.emit("reattack_start", round=ev["round"])
     else:
-        EV.emit("reattack_done", round=ev["round"], status=ev.get("status"), turns=ev.get("turns"))
-        EV.emit("check", name="5", status={"not_proven": "pass", "proven": "fail"}.get(
-            ev.get("status"), "skipped"))
+        EV.emit("reattack_done", round=ev["round"], status=ev.get("status"), turns=ev.get("turns"),
+                novel=ev.get("novel"))
+        status = ev.get("status")
+        EV.emit("check", name="5", status=(
+            "fail" if status == "proven" else "skipped" if status != "not_proven"
+            else "pass" if ev.get("novel") else "not_diverse"))
+
+
+STRICT_RETRY_KEYS = ("status", "reason", "predicate", "poc_name", "turns", "requests",
+                     "elapsed_s", "label")
+
+
+def _strict_retry_entry(row: dict[str, Any], finding: dict[str, Any],
+                        strict: bool) -> dict[str, Any] | None:
+    """The row's strict re-proof, on the finding it concerns (BRIEF 4.1 keys only).
+
+    proven: the finding citing the strict PoC (the loose one is no longer a finding);
+    otherwise: the finding still standing on its loose proof."""
+    sr = row.get("strict_retry")
+    if not sr:
+        return None
+    if sr.get("status") == "proven":
+        applies = finding.get("poc_name") == sr.get("poc_name")
+    else:
+        applies = not strict
+    return {k: sr.get(k) for k in STRICT_RETRY_KEYS} if applies else None
 
 
 def _finding_evidence(row: dict[str, Any], finding: dict[str, Any], *, work: Path,
@@ -335,6 +371,9 @@ def _finding_evidence(row: dict[str, Any], finding: dict[str, Any], *, work: Pat
                                     finding.get("offending_expression"))
     out["regression"] = {"status": "unavailable",
                          "note": regression_unavailable_reason(out["predicate"], None)}
+    sr = _strict_retry_entry(row, finding, out["predicate_strict"])
+    if sr is not None:
+        out["strict_retry"] = sr
     if out["predicate"] == "liveness_broken":
         abg["note"] = "liveness_broken 沒有取回金額；證據是可用性被破壞"
     try:
@@ -361,7 +400,8 @@ def _finding_evidence(row: dict[str, Any], finding: dict[str, Any], *, work: Pat
     repo = exploit.get("repo")
     base = reproduce(exploit["source"], exploit["solidity"], work, sid, repo=repo)
     EV.emit("abg", status=base["status"],
-            environments=[{k: r.get(k) for k in ("env", "A", "B", "G")} for r in base.get("abg") or []])
+            environments=[{k: r.get(k) for k in ("env", "A", "B", "G", "unit", "TA", "TB") if k in r}
+                          for r in base.get("abg") or []])
     if base["status"] != "pass":
         abg.update(status="reproduction_failed", label=ABG_LABELS["reproduction_failed"],
                    note=base.get("reason") or base.get("fail") or base.get("error"),
@@ -467,25 +507,44 @@ def _timeline(rec: dict[str, Any], reattack_turns: int) -> dict[str, Any]:
                 "attacks": len(rec.get("reattacks") or [])}
     last = next((e for e in reversed(rec.get("timeline") or [])
                  if e["side"] == "attack" and e.get("source") == "reattack"), None)
+    if last and "attempts" in last:
+        # BRIEF 4.1: the deciding re-attack's exploits, each with its trace fingerprint and
+        # novelty against the attacks proven before it.
+        reattack.update(attempts=last["attempts"], novel=last.get("novel"),
+                        novelty=last.get("novelty"))
     if c5.get("status") == "pass" and last:
         reattack["label"] = f"修補後再攻擊 1 次（{last.get('turns')} 回合）未成功"
+    elif c5.get("status") == "not_diverse" and last:
+        reattack["label"] = (f"修補後再攻擊 1 次（{last.get('turns')} 回合）未成功，但 "
+                             + ("AI 沒有換手法（同一手法換個寫法）" if last.get("attempts")
+                                else "AI 沒有寫出任何攻擊程式")
+                             + "，所以檢查 5 不算通過")
     elif c5.get("status") == "skipped":
         reattack["label"] = "修補後再攻擊沒有完成（不算通過）"
     elif c5.get("status") == "fail":
-        reattack["label"] = PATCH_REATTACK_FAILED
+        reattack["label"] = PATCH_REATTACK_FAILED + (
+            f"（{_PROVEN_HOW[c5['novelty']]}）" if c5.get("novelty") in _PROVEN_HOW else "")
     out: dict[str, Any] = {"timeline": tl, "reattack": reattack}
     if rec.get("repo_tests"):
         out["repo_tests"] = rec["repo_tests"]
     return out
 
 
+# How a proven re-attack relates to the attacks before it, from the trace (technique.py).
+_PROVEN_HOW = {"same": "同一手法換個寫法仍打穿修補", "new_entry": "同類手法換個入口打穿修補",
+               "new_class": "換了手法打穿修補"}
+
+
 def _attack_label(e: dict[str, Any]) -> str:
     if e.get("source") == "audit":
         return "攻擊成功（已證實）"
     if e["result"] == "proven":
-        return "換手法攻擊：成功（修補被打穿）"
+        return f"再攻擊：成功（{_PROVEN_HOW.get(e.get('novelty'), '修補被打穿')}）"
     if e["result"] == "not_proven":
-        return f"換手法攻擊：未成功（{e.get('turns')} 回合）"
+        if "attempts" not in e or e.get("novel"):   # (recordings from before the check)
+            return f"換手法攻擊：未成功（{e.get('turns')} 回合）"
+        return (f"再攻擊：未成功（{e.get('turns')} 回合），但"
+                + ("沒有換手法" if e["attempts"] else "沒有寫出攻擊程式") + "（不算通過）")
     return "換手法攻擊：沒有完成（不算通過）"
 
 
@@ -567,8 +626,17 @@ def _unrun_row(item_id: str, path: str, stop: str, error: str) -> dict[str, Any]
             "error": error}
 
 
-def _hermetic_compile_error(code: str, job: Path) -> str | None:
-    """None if the contract compiles on its own, else the compiler's first error."""
+def _hermetic_compile_error(code: str, job: Path,
+                            item: dict[str, Any] | None = None) -> str | None:
+    """None if the contract compiles on its own, else the compiler's first error.
+
+    The probe here always declares pragma >=0.8.0, so it refuses every contract below
+    0.8 ("Found incompatible versions"). In --mode repo (`item` carries the one-file
+    repository) the audit builds its context differently -- run.py's plan_for +
+    prepare_context, whose test pragma follows the contract's own -- so when this probe
+    fails, that context is tried before refusing: a 0.7.6 contract the audit can build
+    is no longer turned away before it starts. A contract that builds here is unaffected.
+    """
     ws = Workspace(job / "ctx", "context", code)
     try:
         result = ws.context_ok()
@@ -576,6 +644,22 @@ def _hermetic_compile_error(code: str, job: Path) -> str | None:
         ws.cleanup()
     if result.ok:
         return None
+    if item is not None and item.get("path"):
+        from .repo import plan_for
+        try:
+            plan = plan_for(Path(item["path"]), repo_root=Path(item["repo_root"]))
+            ws = Workspace(job / "ctx", "context", code, plan=plan)
+            try:
+                if ws.prepare_context().get("ok"):
+                    return None
+            finally:
+                ws.cleanup()
+        except Exception:  # noqa: BLE001 -- the hermetic error below still stands
+            pass
+    # A compiler the sandbox does not carry (and cannot download) is not the contract's
+    # fault; say which version and what the sandbox has, not "Read-only file system".
+    if missing := explain_pragma(code) or explain_missing(result.combined):
+        return f"context_unbuildable: {missing}"
     lines = [ln.strip() for ln in result.combined.splitlines() if ln.strip()]
     # solc's own diagnostic ("Error (6933): Expected primary expression.") and where it
     # points; forge's "Error: Compiler run failed:" wrapper says nothing by itself.
@@ -630,15 +714,22 @@ def _evidence_ladder(results: Path, job: Path, out: dict[str, Any]) -> None:
             continue
         out.setdefault(sid, {})["rung3"] = {"live": bool(f.get("live")),
                                            "detail": f.get("live_detail") or {}}
-        EV.emit("ladder", rung=3, status="pass" if f.get("live") else "fail", sample_id=sid,
+        unsupported = bool((f.get("live_detail") or {}).get("not_supported"))
+        EV.emit("ladder", rung=3,
+                status="pass" if f.get("live") else "not_supported" if unsupported else "fail",
+                sample_id=sid,
                 text="第 3 階（本地真鏈）：" + ("用真的交易重現了損失" if f.get("live")
+                                            else "這種證明目前不支援真鏈重播（原因見結果頁）"
+                                            if unsupported
                                             else "在真鏈上沒有成立（原因見結果頁）"))
 
 
 def _rung3_reason(detail: dict[str, Any], finding: dict[str, Any]) -> str:
     """Why the local chain did not show harm, in plain words, from the data alone."""
     parts = []
-    if not detail:
+    if detail and detail.get("not_supported"):
+        parts.append(str(detail.get("reason") or "這種證明目前不支援真鏈重播。"))
+    elif not detail:
         parts.append("這個攻擊的寫法目前沒辦法自動轉成真鏈交易（三種轉譯方式都不支援），所以沒有重播。")
     elif detail.get("error"):
         parts.append(f"重播時發生錯誤：{str(detail['error'])[:160]}")
@@ -675,7 +766,8 @@ def _ladder_entry(rec: dict[str, Any] | None, finding: dict[str, Any]) -> dict[s
                               for k in ("what", "actor", "tx", "gas_used", "ok", "note")}
                              for st in w.get("steps") or []]}
                   for w in d.get("worlds") or []]
-        r3 = {"status": "pass" if r3raw["live"] else "fail",
+        r3 = {"status": ("pass" if r3raw["live"] else
+                         "not_supported" if d.get("not_supported") else "fail"),
               "summary": {k: d.get(k) for k in ("recovered_clean", "recovered_attacked",
                                                 "attacker_gain", "shortfall", "proven")},
               "worlds": worlds,
@@ -821,7 +913,7 @@ def _run_gate(args: argparse.Namespace, log: Any = print,
                                "toolchain_unavailable: forge not found on PATH")]
             input_desc["llm_requests_this_invocation"] = 0
         elif self_contained and (EV.stage("compile", "正在檢查合約能不能編譯（這一步還沒用到 AI）")
-                                 or (compile_err := _hermetic_compile_error(code, job)) is not None):
+                                 or (compile_err := _hermetic_compile_error(code, job, item)) is not None):
             # run.py only checks the build in repo mode; a hermetic contract that does
             # not compile would go straight into the agent loop and come back as "no
             # provable attack". No compilable context is no measurement (plan 7.6).
@@ -930,6 +1022,7 @@ def _run_gate(args: argparse.Namespace, log: Any = print,
     return {
         "schema": SCHEMA,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        **_tool_commit(),
         "input": input_desc,
         "models": models,
         "patches_file": args.patches,
@@ -940,6 +1033,28 @@ def _run_gate(args: argparse.Namespace, log: Any = print,
         "note": "已證實可攻擊的判定附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。",
         **extra_out,
     }
+
+
+def _tool_commit() -> dict[str, str]:
+    """Which ARBITER Gate code produced this report, so an on-chain record can name it.
+
+    ARBITER_TOOL_COMMIT wins (a published snapshot commit whose code tree equals this checkout,
+    which is what a reader can look up); otherwise the checkout's own HEAD, with "-dirty" when
+    tracked files differ from it. Nothing is written when git is unavailable."""
+    env = os.environ.get("ARBITER_TOOL_COMMIT", "").strip().lower()
+    if re.fullmatch(r"[0-9a-f]{40}", env):
+        return {"tool_commit": env, "tool_commit_source": "ARBITER_TOOL_COMMIT"}
+    here = Path(__file__).resolve().parent
+    try:
+        head = subprocess.run(["git", "-C", str(here), "rev-parse", "HEAD"], capture_output=True,
+                              text=True, timeout=10).stdout.strip()
+        dirty = subprocess.run(["git", "-C", str(here), "status", "--porcelain", "--untracked-files=no"],
+                               capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if not re.fullmatch(r"[0-9a-f]{40}", head):
+        return {}
+    return {"tool_commit": head, "tool_commit_source": "git HEAD" + ("（有未提交的修改）" if dirty else "")}
 
 
 def _pr_rows(args: argparse.Namespace, run_id: str, job: Path,
@@ -1145,11 +1260,12 @@ def run_arbiter_call(args: argparse.Namespace, evalset: Path, run_id: str,
     from .run import run_arbiter
     return run_arbiter(evalset=evalset, model=args.model, run_id=run_id, out_dir=job,
                        attempts=args.attempts, concurrency=1, max_turns=args.max_turns,
-                       rpm=args.rpm, workspace_root=job / "ws", **extra)
+                       rpm=args.rpm, workspace_root=job / "ws",
+                       strict_retry=getattr(args, "strict_retry", True), **extra)
 
 
-def _eth(v: int | None) -> str:
-    return "?" if v is None else f"{v / 1e18:g}"
+def _eth(v: int | None, unit: Any = WEI) -> str:
+    return format_amount(v, unit, name=False)
 
 
 def print_report(report: dict[str, Any], log: Any = print) -> None:
@@ -1185,13 +1301,26 @@ def print_report(report: dict[str, Any], log: Any = print) -> None:
                 f"proof: {f['poc_name']}")
             if f["predicate_note"]:
                 log(f"    {f['predicate_note']}")
+            sr = f.get("strict_retry")
+            if sr:
+                log(f"    strict retry: {sr['status']} ({sr.get('turns')} turns, "
+                    f"{sr.get('requests')} requests) {sr.get('label')}"
+                    + (f" -- {sr['reason']}" if sr.get("reason") else ""))
             a = f["abg"]
             log(f"    A/B/G: {a.get('label')}" + (f" -- {a['note']}" if a.get("note") else ""))
             if a["status"] in ("measured", "reproduction_failed"):
-                log("      env  endow     warp     rounds   A(ETH)  B(ETH)  G(ETH)")
-                for r in a["environments"]:
+                envs = a["environments"]
+                n = unit_name(next((r.get("unit") for r in envs if r.get("unit")), WEI))
+                owner = any("TA" in r for r in envs)
+                log(f"      env  endow     warp     rounds   A({n})  B({n})  G({n})"
+                    + (f"  TA({n})  TB({n})" if owner else ""))
+                for r in envs:
+                    ru = r.get("unit", WEI)
                     log(f"      {r['env']:<4} {r['endow_wei'] / 1e18:<9g} {r['warp_s']:<8} "
-                        f"{r['rounds']:<8} {_eth(r['A']):<7} {_eth(r['B']):<7} {_eth(r['G'])}")
+                        f"{r['rounds']:<8} {_eth(r['A'], ru):<7} {_eth(r['B'], ru):<7} "
+                        f"{_eth(r['G'], ru)}"
+                        + (f"  {_eth(r.get('TA'), ru):<7} {_eth(r.get('TB'), ru)}"
+                           if owner else ""))
             p = f["patch"]
             log(f"    patch: {p['label']}" + (f" ({p['origin']}, {p['changed_lines']} lines)"
                                               if p["status"] == "verified" else "")
@@ -1250,6 +1379,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--run-id", default=None, help="default: unique per invocation")
     ap.add_argument("--attempts", type=int, default=1)
     ap.add_argument("--max-turns", type=int, default=16)
+    ap.add_argument("--no-strict-retry", dest="strict_retry", action="store_false",
+                    help="do not follow a loose-predicate proof with one strict-only audit "
+                         "(on by default; it costs up to --max-turns more requests)")
     ap.add_argument("--rpm", type=int, default=45)
     ap.add_argument("--workdir", default="runs/gate", help="per-job directories go here")
     ap.add_argument("--out", default="gate.json")

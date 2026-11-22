@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from .live import ChainUnavailable, LiveChain, Step
+from .units import has_treasury, token_of
 
 PRAGMA_RE = re.compile(r"^\s*pragma solidity ([^;]+);", re.MULTILINE)
 TARGET_DECL_RE = re.compile(
@@ -47,6 +48,21 @@ TARGET_DECL_RE = re.compile(
 
 class Untranslatable(RuntimeError):
     """The proof-of-concept cannot be expressed as transactions. Said, not swallowed."""
+
+
+class NotSupported(Untranslatable):
+    """A proof this replay would mis-measure. Its message is the zh-TW reason shown to
+    the reader, and the walk up the ladder stops at it instead of trying other parsers."""
+
+
+# run_world measures the victim and the attacker in ether, and never runs the owner's
+# claim. Replaying a token or treasury proof would report a number that is not the one
+# the harness proved, so it is refused with the reason instead.
+NOT_SUPPORTED_TOKEN = ("這個證明的金額是以代幣計算（token_expr），本地真鏈重播目前只量 ETH，"
+                       "所以不重播，以免量錯；合成層與獨立專案的結果不受影響。")
+NOT_SUPPORTED_TREASURY = ("這個證明把部署者（金庫）的合法提領也算成受害方（treasury_exit），"
+                          "本地真鏈重播目前只量一般使用者，所以不重播，以免量錯；"
+                          "合成層與獨立專案的結果不受影響。")
 
 
 def _balanced_block(text: str, start: int) -> tuple[str, int]:
@@ -230,6 +246,11 @@ def parse_poc(poc_path: Path, target_path: Path, sample_id: str) -> Replay:
     if not test_m:
         raise Untranslatable("no test contract")
     test_body, _ = _balanced_block(text, test_m.end())
+    if "function arbSetup()" in test_body:
+        if has_treasury(text):
+            raise NotSupported(NOT_SUPPORTED_TREASURY)
+        if token_of(text) is not None:
+            raise NotSupported(NOT_SUPPORTED_TOKEN)
 
     state_decls = _state_declarations(test_body)
     tm = TARGET_DECL_RE.search(state_decls)

@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .units import format_amount, is_wei
 from .workspace import FOUNDRY_TOML, VM_SOL
 
 README = """# {sample_id}
@@ -391,6 +392,10 @@ def regression_unavailable_reason(predicate: str | None, abg_status: str | None)
             "沒有「受害者少拿回多少」的基準數字，所以不產生回歸測試。")
 
 
+def _smallest(e: dict[str, Any]) -> str:
+    return "wei" if is_wei(e.get("unit")) else "最小單位"
+
+
 def regression_contract(environments: list[dict[str, Any]]) -> str:
     """TestArbiterRegression, appended to the stored exploit file."""
     honest = []
@@ -399,10 +404,27 @@ def regression_contract(environments: list[dict[str, Any]]) -> str:
             continue  # no baseline: the original paid nothing back here, nothing to keep
         honest.append(
             f"    /// 環境 {e['env']}（{_ENV_WORDS[e['env']] if e['env'] < len(_ENV_WORDS) else e['env']}）："
-            f"原合約在沒有攻擊時讓使用者取回 {e['A']} wei。\n"
+            f"原合約在沒有攻擊時讓使用者取回 {e['A']} {_smallest(e)}。\n"
             f"    function testHonestPath{e['env']}() public {{ "
             f"_arbHonest({e['endow_wei']}, {e['warp_s']}, {e['rounds']}, {e['A']}); }}"
         )
+    # A proof with a treasury claim keeps the owner's claim too: a "fix" that makes the
+    # owner's withdrawal revert leaves every depositor whole and still breaks the contract.
+    owner = [e for e in environments if e.get("TA")]
+    for e in owner:
+        honest.append(
+            f"    /// 環境 {e['env']}：原合約在沒有攻擊時讓部署者（金庫）的合法提領取回 "
+            f"{e['TA']} {_smallest(e)}。\n"
+            f"    function testOwnerClaim{e['env']}() public {{ "
+            f"_arbOwner({e['endow_wei']}, {e['warp_s']}, {e['rounds']}, {e['TA']}); }}"
+        )
+    owner_helper = """
+
+    function _arbOwner(uint256 endow, uint256 warpBy, uint256 rounds, uint256 before) internal {
+        this.arbTrial(false, endow, warpBy, rounds);
+        require(arbTreasuryRec + ARB_TOLERANCE_WEI >= before,
+                "ARBITER regression: with no attack the owner's claim gets back less than the original paid");
+    }""" if owner else ""
     return f"""
 
 /// ARBITER regression test. testExploitBlocked replays the proven attack in the four
@@ -422,7 +444,7 @@ contract TestArbiterRegression is TestArbiterVictim {{
         (uint256 recovered, , ) = this.arbTrial(false, endow, warpBy, rounds);
         require(recovered + ARB_TOLERANCE_WEI >= before,
                 "ARBITER regression: with no attack the user gets back less than the original paid");
-    }}
+    }}{owner_helper}
 
 {chr(10).join(honest)}
 }}
@@ -495,14 +517,25 @@ patch -p1 < 你下載的.patch
 
 - 全部通過只代表：**這一個攻擊**在 4 種環境都失效，而且沒有攻擊時，使用者取回的錢沒有比原合約少。不代表合約沒有其他漏洞。
 - 攻擊和使用者的操作步驟，是照當初證明攻擊時的寫法。如果你改了合約的對外介面（函式名稱、參數），這份測試要跟著改。
-- 容差是 {tolerance} wei。
+- 容差是 {tolerance} {smallest}。
 
 ## 來源
 
 - 漏洞：{title}（函式 `{function}`）
-- 證明方式：`victim_loss`。有攻擊時受害者取回的比沒有攻擊時少，而且攻擊者手上至少多了這個差額。
+- 證明方式：`victim_loss`。有攻擊時受害者取回的比沒有攻擊時少，而且攻擊者手上至少多了這個差額。{measure_note}
 - 稽核模型：{models}；run：`{run_id}`；產生時間：{generated_at}
 """
+
+
+def _measure_note(environments: list[dict[str, Any]]) -> str:
+    """What else the proof measured, for the README (empty for an ether-only proof)."""
+    unit = next((e.get("unit") for e in environments if e.get("unit")), None)
+    notes = []
+    if unit is not None and not is_wei(unit):
+        notes.append(f"金額以代幣 {unit.get('token')} 計算。")
+    if any("TA" in e for e in environments):
+        notes.append("部署者（金庫）的合法提領也算受害方：攻擊者至少要拿到受害者與金庫合計少拿的部分。")
+    return "".join(notes)
 
 
 def write_regression(proj: Path, *, source: str, contract_file: str, exploit_solidity: str,
@@ -528,7 +561,12 @@ def write_regression(proj: Path, *, source: str, contract_file: str, exploit_sol
         name = _ENV_WORDS[e["env"]] if e["env"] < len(_ENV_WORDS) else str(e["env"])
         rows.append(
             f"| `testHonestPath{e['env']}` | 環境 {e['env']}（{name}）：沒有攻擊時，使用者取回至少 "
-            f"{e['A'] / 10**18:g} ETH（原合約的金額） | 通過 | 通過 |")
+            f"{format_amount(e['A'], e.get('unit'), zh=True)}（原合約的金額） | 通過 | 通過 |")
+    for e in environments:
+        if e.get("TA"):
+            rows.append(
+                f"| `testOwnerClaim{e['env']}` | 環境 {e['env']}：沒有攻擊時，部署者（金庫）的合法提領"
+                f"取回至少 {format_amount(e['TA'], e.get('unit'), zh=True)}（原合約的金額） | 通過 | 通過 |")
     skipped = [e["env"] for e in environments if not e.get("A")]
     if skipped:
         rows.append(f"| （環境 {', '.join(map(str, skipped))}） | 原合約在這些環境沒有取回金額可當基準，所以沒有誠實路徑測試 | — | — |")
@@ -538,6 +576,8 @@ def write_regression(proj: Path, *, source: str, contract_file: str, exploit_sol
         contract_file=contract_file, test_dir=REGRESSION_DIR, test_file=REGRESSION_FILE,
         solc_line=f"solc {solc}" if solc else "solc 自動選擇",
         honest_rows="\n".join(rows), tolerance=REGRESSION_TOLERANCE_WEI,
+        smallest=_smallest(environments[0]) if environments else "wei",
+        measure_note=_measure_note(environments),
         models=", ".join(meta.get("models") or []) or "未記錄",
         run_id=meta.get("run_id") or "未記錄",
         generated_at=meta.get("generated_at") or "未記錄"), encoding="utf-8")

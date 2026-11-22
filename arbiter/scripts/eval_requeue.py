@@ -41,6 +41,12 @@ MAX_REQUEUES = 2
 
 def _reasons(row: dict) -> list[str]:
     reasons = [str(a.get("stop_reason") or "") for a in row.get("attempts") or []]
+    # A strict re-proof (cli.py run --strict-retry) that lost the gateway measured
+    # nothing either; only that case is taken from it, so its ordinary failures (a
+    # conclude_safe, a script error) never change how the row is classified.
+    retry = str((row.get("strict_retry") or {}).get("reason") or "")
+    if retry.startswith(INFRA_PREFIX):
+        reasons.append(retry)
     reasons.append(str((row.get("outcome") or {}).get("stop_reason") or ""))
     return reasons
 

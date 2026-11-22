@@ -27,6 +27,7 @@ from .gateway import Gateway
 from .tools import (
     AgentOutcome,
     ToolDispatcher,
+    offered_predicates,
     parse_arguments,
     tool_schemas,
 )
@@ -62,7 +63,7 @@ probe behaviour cheaply, but understand that a passing run_poc is worth nothing 
 evidence -- you chose what it asserts, so all it can prove is that your own assertion is \
 true.
 
-   There are two predicates, and **victim_loss is the one you will almost always want**. \
+   There are two strict predicates, and **victim_loss is the one you will almost always want**. \
 It states what a vulnerability actually is: somebody else loses. You give victim_enter \
 and victim_exit -- what an ordinary user does to take a position in this contract, and \
 what they do to get their money back -- and the harness runs the whole scenario TWICE \
@@ -92,9 +93,12 @@ again. If the predicate still holds without it, the finding is refused -- becaus
 something in your setup caused it, not your attack.
 
    If the target requires msg.sender == tx.origin, no contract can call it; use \
-mode='eoa'. If the value at stake is an ERC20 rather than ether, use token_profit. \
-deploy_code can set up the world first -- fund the contract, have the owner airdrop to \
-the attacker -- because setup is not part of the attack and the measurement starts after it.
+mode='eoa'. If the value at stake is an ERC20 rather than ether, keep victim_loss and \
+name the token in token_expr: the harness then measures the victim's loss and your gain \
+in that token. deploy_code can set up the world first -- fund the contract, mint tokens, \
+wire its collaborators -- because setup is not part of the attack and the measurement \
+starts after it. It cannot name the victim or the attacker: their accounts are drawn \
+after you write it.
 5. Read the result honestly.
    - Passed: you have admissible evidence. Submit the finding, citing that exploit.
    - Compile error: fix it and rerun.
@@ -202,8 +206,10 @@ does exactly the same, except your Attacker runs in between. The finding is acce
 if that depositor got LESS back the second time. You never write that comparison, and you \
 cannot make the first run look bad, because it is your own code with the attack deleted.
 
-It also checks something you cannot talk it out of: **the value has to come out of the \
-contract under audit**. Its holdings must fall by at least what you gained. This is the \
+It also checks something you cannot talk it out of: **you must end up holding at least \
+what that depositor lost**. The profit predicates (eth_profit, token_profit) check the \
+same thing their own way: **the value has to come out of the contract under audit**, \
+whose holdings must fall by at least what you gained. This is the \
 single most common way an exploit looks like it worked and proved nothing. The shape, \
 measured on a real repository: the agent deployed a mock of a collaborator contract whose \
 only behaviour was to hand out tokens on request, funded it, called it, and got tokens -- \
@@ -284,7 +290,8 @@ You have not attempted run_exploit yet. Nothing you have run so far can support 
 finding, because you chose its success condition. If you believe there is a \
 vulnerability, prove it now with run_exploit: write an Attacker contract with \
 constructor(address) and attack(), deploy the contract under audit into a variable \
-named target, and pick eth_profit or state_change. If you do not believe there is one, \
+named target, and pick victim_loss with victim_enter and victim_exit (liveness_broken if \
+the harm is denial of service). If you do not believe there is one, \
 call conclude_safe.\
 """
 
@@ -314,9 +321,14 @@ def audit(
     single hypothesis across ten consecutive exploits. That is also why raising the
     attempt budget from three to five bought almost nothing -- it bought more runs of the
     same wrong idea.
+
+    ``predicates`` is the set run_exploit accepts AND the set the schema offers (None:
+    all five, strict first). It was the schema's enum alone, which the dispatcher never
+    enforced.
     """
-    dispatcher = ToolDispatcher(workspace)
-    schemas = tool_schemas(predicates) if predicates else tool_schemas()
+    allowed = offered_predicates(predicates)
+    dispatcher = ToolDispatcher(workspace, predicates=allowed)
+    schemas = tool_schemas(allowed)
     plan = workspace.plan
     task = USER_TEMPLATE.format(
         location=(

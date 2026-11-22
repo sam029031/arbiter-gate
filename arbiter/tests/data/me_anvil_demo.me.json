@@ -1,0 +1,154 @@
+{
+ "schema": "arbiter-me/0.1",
+ "network": "anvil",
+ "chainId": 31337,
+ "registry": "0xb7f8bc63bbcad18155201308c8f3540b07f84f5e",
+ "escrow": "0xa51c1fc2f0d1a1b8494ed1fe312d7c3a78ed91c0",
+ "record": {
+  "id": 1,
+  "tx": "0x0148238eabeef6bd9f586298c86ae8052187467d24f1e0136bab6fa9e38295dd",
+  "block": 21,
+  "verdict": 3,
+  "verdictLabel": "已證實可攻擊",
+  "sourceHash": "0x77c8b55471f4790dd114767722ca3d47fdbde3d11311a1e21275ce097b1baa08",
+  "gateJsonHash": "0x145694fdf6d4fc8bc9a4762ba68e9f96fa8d4d90a7ff40c57bbc1a84d8ed9bd6",
+  "exploitHash": "0x856e3bbf027363d1b2ad31bd1191594983232ee8ee697c2e70154ed3ebe7c7bc",
+  "patchHash": "0x216f02325a7a41ab8e6e9758c5986bca26101ecdfca326cbb54ba43e6981255f",
+  "parentId": 0,
+  "auditor": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+  "model": "arbiter-gpt",
+  "initcodeHash": "0x8c3df937afef7d0d1d2fe140b2496e188e2c130a1313c237abed58ecccf6f641",
+  "toolCommit": "0x50936baed766c16d98fea1df9f5692a034ed5307"
+ },
+ "deploy": {
+  "status": "blocked",
+  "reason": "登錄合約拒絕部署：這筆紀錄的判定是 3（已證實可攻擊）（NotDeployable(3)）",
+  "address": null,
+  "tx": "0x49d127fe01be59ea62e4ffbc28786570806d0bb77648223d0af9a6e38030c6d7",
+  "linkKind": 0,
+  "runtimeCodeHash": null,
+  "preflight": {
+   "ok": true,
+   "gas": 207113,
+   "error": null
+  }
+ },
+ "escrow_request": {
+  "id": 1,
+  "fee_wei": "1000000000000000",
+  "status": "paid",
+  "settleTx": "0x7e6a4f6920e9a82d633c0d25523af8c28e816e5a92368958d0d46e11a102bdd5",
+  "recordId": 1,
+  "recipient": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+  "cosmosTx": null
+ },
+ "explorer": {
+  "record_tx": null,
+  "deploy_tx": null,
+  "address": null,
+  "registry": null
+ },
+ "evidence": {
+  "uri": "original",
+  "manifest": "0x252f4cf0b36b2272d3d5766a8272074e594bbed391493211ab846dff42160231",
+  "files": [
+   {
+    "name": "compiler.json",
+    "sha256": "0x52983299e3e5dbfcfab8d28dd15862c1352ab77c286b4ecfcf383d02a3f05a14"
+   },
+   {
+    "name": "exploit/StakingVaultReentrancyVictimLossExploitPoc.t.sol",
+    "sha256": "0x856e3bbf027363d1b2ad31bd1191594983232ee8ee697c2e70154ed3ebe7c7bc"
+   },
+   {
+    "name": "gate.json",
+    "sha256": "0x145694fdf6d4fc8bc9a4762ba68e9f96fa8d4d90a7ff40c57bbc1a84d8ed9bd6"
+   },
+   {
+    "name": "patch.diff",
+    "sha256": "0x216f02325a7a41ab8e6e9758c5986bca26101ecdfca326cbb54ba43e6981255f"
+   },
+   {
+    "name": "regression.zip",
+    "sha256": "0xe9ac06f14e799874a883ee2f4b31e866d47ba5db5deca30c3ccebaacda595f4c"
+   },
+   {
+    "name": "src/StakingVault.sol",
+    "sha256": "0x77c8b55471f4790dd114767722ca3d47fdbde3d11311a1e21275ce097b1baa08"
+   }
+  ]
+ },
+ "recordedAt": "2026-11-22T00:20:48+08:00",
+ "patched": {
+  "record": {
+   "id": 2,
+   "tx": "0xf35a55df77d9f07a1384adb49aa76838af283823ac87a4b139ac719efeb8fcce",
+   "block": 24,
+   "verdict": 1,
+   "verdictLabel": "未發現可證明攻擊（不等於安全）",
+   "sourceHash": "0x857c523e8a8cee15a50524dcd4c4a8ac6bb3b9881d31654f3f935ceae09dddbc",
+   "gateJsonHash": "0x145694fdf6d4fc8bc9a4762ba68e9f96fa8d4d90a7ff40c57bbc1a84d8ed9bd6",
+   "exploitHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "patchHash": "0x216f02325a7a41ab8e6e9758c5986bca26101ecdfca326cbb54ba43e6981255f",
+   "parentId": 1,
+   "auditor": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+   "model": "arbiter-gpt",
+   "initcodeHash": "0x9ec393a5921d33ffcd2f5308a202f703d514be1ff18be771f8a0a0ce9ba510ee",
+   "toolCommit": "0x50936baed766c16d98fea1df9f5692a034ed5307"
+  },
+  "deploy": {
+   "status": "deployed",
+   "reason": "",
+   "address": "0x99c50b5d1737b8decec1925e1971c0fb2d713ebc",
+   "tx": "0x2c8821000a9be82d8d8f1544c341ac3ca38cbed75628dc86f14b37b6cc41878b",
+   "linkKind": 2,
+   "runtimeCodeHash": "0xfccdf22fa02846ced331f2ac86f83f39d40beadc8084a5a396358f8059f6274f",
+   "preflight": {
+    "ok": true,
+    "gas": 206909,
+    "error": null
+   }
+  },
+  "explorer": {
+   "record_tx": null,
+   "deploy_tx": null,
+   "address": null,
+   "registry": null
+  },
+  "evidence": {
+   "uri": "patched",
+   "manifest": "0x8250edbaca9009d9a86f81fff595f9010f9833988be4f511a6a73f3bd2610e5b",
+   "files": [
+    {
+     "name": "compiler.json",
+     "sha256": "0x52983299e3e5dbfcfab8d28dd15862c1352ab77c286b4ecfcf383d02a3f05a14"
+    },
+    {
+     "name": "exploit/StakingVaultReentrancyVictimLossExploitPoc.t.sol",
+     "sha256": "0x856e3bbf027363d1b2ad31bd1191594983232ee8ee697c2e70154ed3ebe7c7bc"
+    },
+    {
+     "name": "gate.json",
+     "sha256": "0x145694fdf6d4fc8bc9a4762ba68e9f96fa8d4d90a7ff40c57bbc1a84d8ed9bd6"
+    },
+    {
+     "name": "parent_src/StakingVault.sol",
+     "sha256": "0x77c8b55471f4790dd114767722ca3d47fdbde3d11311a1e21275ce097b1baa08"
+    },
+    {
+     "name": "patch.diff",
+     "sha256": "0x216f02325a7a41ab8e6e9758c5986bca26101ecdfca326cbb54ba43e6981255f"
+    },
+    {
+     "name": "regression.zip",
+     "sha256": "0xe9ac06f14e799874a883ee2f4b31e866d47ba5db5deca30c3ccebaacda595f4c"
+    },
+    {
+     "name": "src/StakingVault.sol",
+     "sha256": "0x857c523e8a8cee15a50524dcd4c4a8ac6bb3b9881d31654f3f935ceae09dddbc"
+    }
+   ]
+  },
+  "recordedAt": "2026-11-22T00:20:49+08:00"
+ }
+}

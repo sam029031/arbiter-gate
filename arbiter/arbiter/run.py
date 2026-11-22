@@ -24,6 +24,7 @@ from .agent import audit, outcome_to_label
 from .gateway import Gateway, RateLimiter
 from .proposals import load_hits, proposal_block, rarity
 from .repo import plan_for
+from .tools import STRICT_PREDICATES, AgentOutcome, PocRecord
 from .workspace import BuildUnavailable, Workspace
 
 
@@ -62,6 +63,7 @@ def run_arbiter(
     on_turn: Any = None,
     on_row: Any = None,
     on_request: Any = None,
+    strict_retry: bool = False,
 ) -> dict[str, Any]:
     """`proposal_renderer(hits, rarity) -> str` replaces proposal_block (whose wording
     describes Bastet) for another proposal source; None keeps proposal_block.
@@ -71,7 +73,12 @@ def run_arbiter(
     its tools, they have not run yet -- with sample, attempt, turn, the turn budget and
     the tool calls; `on_row(row)` after a sample's row is written; `on_request(messages,
     tag)` is handed to the gateway and fires before every model request, so the previous
-    tool results are visible to whoever listens. A hook that raises is ignored."""
+    tool results are visible to whoever listens. A hook that raises is ignored.
+
+    `strict_retry` (off by default, so earlier runs stay reproducible): when the final
+    outcome is proven only under a loose predicate, one more audit runs, restricted to
+    the strict predicates and briefed with the loose proof (see run_strict_retry). The
+    row carries `strict_retry`; the turn events of that audit carry strict_retry=True."""
     meta, items = load_evalset(evalset)
     render = proposal_renderer or proposal_block
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -290,7 +297,23 @@ def run_arbiter(
                 ):
                     ruled_out.append(text)
 
+        retry_rec: dict[str, Any] | None = None
+        if strict_retry and loose_proof(outcome) is not None:
+            retry_trace: list[dict[str, Any]] = (
+                _TurnSink(on_turn, {"sample_id": item["id"], "repeat": repeat,
+                                    "attempt": attempts, "attempts": attempts + 1,
+                                    "max_turns": max_turns, "strict_retry": True})
+                if on_turn is not None else [])
+            outcome, retry_rec = run_strict_retry(
+                gateway, outcome,
+                lambda: Workspace(ws_root / f"r{repeat}strict", item["id"], item["code"],
+                                  plan=plan),
+                max_turns=max_turns, max_tokens=max_tokens, trace_sink=retry_trace)
+            retry_rec["trace"] = list(retry_trace)
+
         row = _row(repeat, item, outcome, tried, trace, error, t0, context)
+        if retry_rec is not None:
+            row["strict_retry"] = retry_rec
         _emit(row, outcome)
         return row
 
@@ -328,6 +351,7 @@ def run_arbiter(
         "proposals_from": str(proposals_path) if proposals_path else None,
         "carry_ruled_out": carry_ruled_out,
         "predicates": list(predicates) if predicates else None,
+        "strict_retry": _strict_retry_stats(rows) if strict_retry else None,
         "max_turns": max_turns,
         "max_tokens": max_tokens,
         "wall_clock_s": round(time.monotonic() - started, 1),
@@ -343,6 +367,188 @@ def run_arbiter(
         json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8"
     )
     return summary
+
+
+# -- strict re-proof of a loose proof ---------------------------------------------------
+#
+# Measured on arbiter-gpt (P7b, gptoss-v3-r1..r3): 5, 6 and 5 of the 7, 9 and 8 true
+# positives were proven only under a loose predicate, whose baseline the agent writes
+# itself. Such a proof still blocks deployment, but it cannot be measured (A/B/G) or
+# patched. The follow-up asks the same model, in a fresh audit offered only the strict
+# predicates, to express that same attack as victim_loss, and hands it the loose proof
+# in full rather than the trace (whose arguments are cut at 4000 characters).
+
+STRICT_RETRY_LABELS = {
+    # "proven" is worded per predicate (STRICT_RETRY_PROVEN); this is the fallback.
+    "proven": "以嚴格謂詞重新證實",
+    "not_proven": "嚴格謂詞重試沒有成功，保留原本的寬鬆證明",
+    "skipped": "沒有進行嚴格謂詞重試",
+    "error": "嚴格謂詞重試沒有完成（執行錯誤），保留原本的寬鬆證明",
+}
+STRICT_RETRY_PROVEN = {
+    "victim_loss": "以嚴格謂詞 victim_loss 重新證實：受害者確實因攻擊少拿回錢",
+    "liveness_broken": "以嚴格謂詞 liveness_broken 重新證實：攻擊後一般使用者的操作無法完成",
+}
+
+MAX_BRIEF_SOLIDITY = 24000
+
+STRICT_RETRY_BRIEF = """
+
+An earlier audit of this exact contract demonstrated an attack, but only under the loose \
+predicate {predicate}, which compares the attacker against a baseline the same agent \
+wrote. That is weaker evidence: it cannot be measured or patched. This audit accepts only \
+the strict predicates, {strict}.
+
+The earlier attack's hypothesis:
+  {hypothesis}
+
+The complete test file the harness composed and ran for it{cut} -- the attack is the \
+Attacker contract (or the statements in the attacker's pranked block), the deployment is \
+the code that assigns `target`:
+
+```solidity
+{solidity}
+```
+
+Express the same theft as victim_loss. Reuse the deployment and the attack, and add \
+victim_enter and victim_exit for an ordinary user whose value the attack takes; the \
+harness then checks that this user recovers less because the attack ran and that the \
+attacker holds what they lost. If the damage is that an ordinary operation stops working \
+rather than value moving, use liveness_broken instead. If no ordinary user loses anything \
+to this attack, say why with conclude_safe.\
+"""
+
+
+def loose_proof(outcome: Any) -> PocRecord | None:
+    """The loose PoC behind a proven outcome that has no strict one; otherwise None."""
+    if outcome is None or not outcome.proven:
+        return None
+    passed = [p for p in outcome.pocs if p.passed and p.adjudicated]
+    if not passed or any(p.predicate in STRICT_PREDICATES for p in passed):
+        return None
+    cited = {f.get("poc_name") for f in outcome.findings}
+    return next((p for p in passed if p.name in cited), passed[0])
+
+
+def strict_retry_brief(loose: PocRecord) -> str:
+    solidity = loose.solidity or ""
+    cut = ""
+    if len(solidity) > MAX_BRIEF_SOLIDITY:
+        solidity, cut = solidity[:MAX_BRIEF_SOLIDITY], f" (first {MAX_BRIEF_SOLIDITY} characters)"
+    return STRICT_RETRY_BRIEF.format(
+        predicate=loose.predicate, strict=", ".join(STRICT_PREDICATES),
+        hypothesis=" ".join((loose.hypothesis or "(none given)").split()),
+        solidity=solidity.strip(), cut=cut)
+
+
+class _CountingGateway:
+    """Counts this audit's model requests; a shared gateway's usage spans every worker."""
+
+    def __init__(self, gateway: Any) -> None:
+        self._gateway = gateway
+        self.requests = 0
+
+    def chat(self, *args: Any, **kwargs: Any) -> Any:
+        self.requests += 1
+        return self._gateway.chat(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._gateway, name)
+
+
+def run_strict_retry(
+    gateway: Any,
+    outcome: AgentOutcome,
+    make_workspace: Any,
+    *,
+    max_turns: int,
+    max_tokens: int = 4096,
+    trace_sink: list[dict[str, Any]] | None = None,
+) -> tuple[AgentOutcome, dict[str, Any]]:
+    """One strict-only audit after a loose proof. Returns (outcome to record, record).
+
+    Success means a passed, adjudicated strict PoC. Its outcome then lists the retry's
+    PoCs FIRST, so everything that takes the first admissible PoC (patch.exploit_from_row,
+    report_arm.winning_predicate) takes the strict one, and its findings cite it: the
+    retry's own findings, or -- when the strict PoC passed but the model did not submit
+    -- the loose finding re-pointed at it. Anything else keeps the loose outcome, with
+    the retry's failed PoCs appended after it so every attempt stays on record.
+    """
+    loose = loose_proof(outcome)
+    rec: dict[str, Any] = {
+        "status": "skipped", "reason": "", "predicate": None, "poc_name": None,
+        "turns": 0, "requests": 0, "elapsed_s": 0.0, "label": "",
+        "loose": {"poc_name": loose.name if loose else None,
+                  "predicate": loose.predicate if loose else None},
+    }
+    if loose is None:
+        rec.update(reason="no loose-only proof", label=STRICT_RETRY_LABELS["skipped"])
+        return outcome, rec
+    t0 = time.monotonic()
+    counting = _CountingGateway(gateway)
+    retry: AgentOutcome | None = None
+    ws = None
+    try:
+        ws = make_workspace()
+        retry = audit(counting, ws, max_turns=max_turns, max_tokens=max_tokens,
+                      trace_sink=trace_sink, proposals=strict_retry_brief(loose),
+                      predicates=STRICT_PREDICATES)
+    except BuildUnavailable as exc:
+        rec.update(status="error", reason=f"error: toolchain_unavailable: {exc}"[:300])
+    except Exception as exc:  # noqa: BLE001 -- the loose proof must survive a failed retry
+        rec.update(status="error", reason=f"error: {type(exc).__name__}: {exc}"[:300])
+    finally:
+        if ws is not None:
+            ws.cleanup()
+        rec["requests"] = counting.requests
+        rec["elapsed_s"] = round(time.monotonic() - t0, 2)
+
+    merged = outcome
+    if retry is not None:
+        rec["turns"] = retry.turns
+        strict = next((p for p in retry.pocs if p.passed and p.adjudicated
+                       and p.predicate in STRICT_PREDICATES), None)
+        refusals = dict(outcome.refusals)
+        for gate, n in retry.refusals.items():
+            refusals[gate] = refusals.get(gate, 0) + n
+        if strict is not None:
+            findings = [f for f in retry.findings if f.get("poc_name") == strict.name]
+            carried = not findings
+            if carried:
+                base = next((f for f in outcome.findings if f.get("poc_name") == loose.name),
+                            outcome.findings[0] if outcome.findings else {})
+                findings = [{**base, "poc_name": strict.name,
+                             "poc_hypothesis": strict.hypothesis}]
+            merged = AgentOutcome(
+                verdict="vulnerable", findings=findings, safe_reason=None,
+                pocs=list(retry.pocs) + list(outcome.pocs),
+                rejected_submissions=outcome.rejected_submissions + retry.rejected_submissions,
+                turns=outcome.turns, stop_reason=outcome.stop_reason, refusals=refusals)
+            rec.update(status="proven", predicate=strict.predicate, poc_name=strict.name,
+                       reason=("strict_poc_passed_finding_carried" if carried
+                               else "strict_proven"))
+        else:
+            merged = AgentOutcome(
+                verdict=outcome.verdict, findings=outcome.findings,
+                safe_reason=outcome.safe_reason, pocs=list(outcome.pocs) + list(retry.pocs),
+                rejected_submissions=outcome.rejected_submissions + retry.rejected_submissions,
+                turns=outcome.turns, stop_reason=outcome.stop_reason, refusals=refusals)
+            why = (retry.safe_reason or {}).get("reason") or ""
+            rec.update(status="not_proven",
+                       reason=(retry.stop_reason or "no strict PoC passed")
+                       + (f": {' '.join(str(why).split())[:240]}" if why else ""))
+    rec["label"] = (STRICT_RETRY_PROVEN.get(rec["predicate"], STRICT_RETRY_LABELS["proven"])
+                    if rec["status"] == "proven" else STRICT_RETRY_LABELS[rec["status"]])
+    return merged, rec
+
+
+def _strict_retry_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    recs = [r["strict_retry"] for r in rows if r.get("strict_retry")]
+    by: dict[str, int] = {}
+    for rec in recs:
+        by[rec["status"]] = by.get(rec["status"], 0) + 1
+    return {"triggered": len(recs), "by_status": by,
+            "requests": sum(int(rec.get("requests") or 0) for rec in recs)}
 
 
 def _safe_call(hook: Any, *args: Any) -> None:
@@ -423,11 +629,13 @@ def _mean_requests(rows: list[dict[str, Any]]) -> float:
 
     Reported because it is the axis the gateway actually rations. Bastet spends 53 per
     sample by construction; if ARBITER exceeds that, its accuracy advantage is bought
-    rather than earned and the comparison has to say so.
+    rather than earned and the comparison has to say so. A strict re-proof's requests
+    count too (rows without one are unchanged).
     """
     if not rows:
         return 0.0
     total = sum(sum(a["turns"] for a in r.get("attempts", [])) for r in rows)
+    total += sum(int((r.get("strict_retry") or {}).get("requests") or 0) for r in rows)
     return round(total / len(rows), 2)
 
 

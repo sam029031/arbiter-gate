@@ -9,8 +9,12 @@ harness exactly as an agent's run_exploit would be.
 
   two_rounds   P_ALL (closes withdrawAll only) passes 0-4; the re-attack proves E_ONE;
                P_BOTH passes, and check 1 re-runs E_ONE against it; the next re-attack
-               finds nothing -> accepted, timeline attack/defend/attack/defend/attack,
-               the second re-attack told both hypotheses
+               finds nothing with a new technique -> accepted, timeline attack/defend/
+               attack/defend/attack, the second re-attack told both hypotheses
+  not_diverse  the re-attack finds nothing but tried only known mechanisms (its trace
+               fingerprints say "same", technique.py) -> the patch is still accepted,
+               check 5 is "not_diverse", never a pass (technique_probe tests the
+               fingerprints themselves; here the re-attack's result is scripted)
   extra_blocks after E_ONE, the model proposes P_ALL again: check 1 refuses it because
                E_ONE still succeeds (that is what makes the new attack evidence); then
                P_BOTH -> accepted
@@ -194,11 +198,15 @@ def main() -> int:
             "hypothesis": "re-enter withdraw(amount) before the balance is written",
             "finding": {"vulnerable_function": "withdraw", "attack_path": "deposit, withdraw, re-enter"},
             "solidity": e_one, "repo_solidity": e_one}}
-        quiet = {"status": "not_proven", "turns": 5, "tried": ["something else"]}
+        quiet = {"status": "not_proven", "turns": 5, "tried": ["something else"], "novel": True,
+                 "attempts": [{"name": "ElsePoc", "hypothesis": "something else", "passed": False,
+                               "fingerprint": None, "novelty": "new_class"}]}
+        same = {**quiet, "novel": False, "attempts": [{**quiet["attempts"][0], "novelty": "same"}]}
 
         cases = [
             ("two_rounds", [P_ALL, P_BOTH], [new_attack, quiet], "accepted",
              "A1:proven -> D1:accepted -> A2:proven -> D2:accepted -> A3:not_proven"),
+            ("not_diverse", [P_ALL], [same], "accepted", "A1:proven -> D1:accepted -> A2:not_proven"),
             ("extra_blocks", [P_ALL, P_ALL, P_BOTH], [new_attack, quiet], "accepted",
              "A1:proven -> D1:accepted -> A2:proven -> D2:accepted -> A3:not_proven"),
             ("capped", [P_ALL, P_BOTH], [new_attack, dict(new_attack)], "rejected_reattack",
@@ -231,6 +239,8 @@ def main() -> int:
                 ok = ok and c5 == "fail" and len(gw.seen) == 2
             if name == "not_run":
                 ok = ok and c5 == "skipped"
+            if name == "not_diverse":
+                ok = ok and c5 == "not_diverse" and rec["timeline"][-1]["novel"] is False
             check(name, ok, detail)
     finally:
         patch_mod.reattack = real

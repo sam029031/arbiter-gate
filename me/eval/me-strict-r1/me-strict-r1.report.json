@@ -1,0 +1,442 @@
+{
+ "runs": {
+  "me-strict-r1": {
+   "as_reported": {
+    "TP": 7,
+    "TN": 18,
+    "FP": 2,
+    "FN": 13,
+    "precision": 0.7778,
+    "recall": 0.35,
+    "specificity": 0.9,
+    "f1": 0.4828,
+    "accuracy": 0.625,
+    "mcc": 0.2993,
+    "ci95": {
+     "precision": [
+      0.4444,
+      1.0
+     ],
+     "recall": [
+      0.1429,
+      0.5714
+     ],
+     "specificity": [
+      0.75,
+      1.0
+     ],
+     "f1": [
+      0.2308,
+      0.6857
+     ],
+     "accuracy": [
+      0.475,
+      0.775
+     ],
+     "mcc": [
+      -0.0056,
+      0.5571
+     ]
+    },
+    "mcc_bootstrap_delta": {
+     "refused": false,
+     "metric": "mcc",
+     "point_delta": 0.2993,
+     "ci95": [
+      -0.0056,
+      0.5571
+     ],
+     "excludes_zero": false,
+     "n_boot": 10000
+    }
+   },
+   "strict_only": {
+    "TP": 4,
+    "TN": 20,
+    "FP": 0,
+    "FN": 16,
+    "precision": 1.0,
+    "recall": 0.2,
+    "specificity": 1.0,
+    "f1": 0.3333,
+    "accuracy": 0.6,
+    "mcc": 0.3333,
+    "ci95": {
+     "precision": [
+      1.0,
+      1.0
+     ],
+     "recall": [
+      0.0455,
+      0.3889
+     ],
+     "specificity": [
+      1.0,
+      1.0
+     ],
+     "f1": [
+      0.087,
+      0.56
+     ],
+     "accuracy": [
+      0.45,
+      0.75
+     ],
+     "mcc": [
+      0.1448,
+      0.5092
+     ]
+    },
+    "mcc_bootstrap_delta": {
+     "refused": false,
+     "metric": "mcc",
+     "point_delta": 0.3333,
+     "ci95": [
+      0.1448,
+      0.5092
+     ],
+     "excludes_zero": true,
+     "n_boot": 10000
+    }
+   },
+   "positives": {
+    "S_stale_cached_price_liquidation": {
+     "truth": "safe",
+     "predicate": "eth_profit"
+    },
+    "S_weak_randomness_flip_payout": {
+     "truth": "safe",
+     "predicate": "eth_profit"
+    },
+    "V_commit_reveal_frontrun": {
+     "truth": "vuln",
+     "predicate": "liveness_broken"
+    },
+    "V_delegatecall_unchecked_module": {
+     "truth": "vuln",
+     "predicate": "victim_loss"
+    },
+    "V_ecrecover_zero_address_session": {
+     "truth": "vuln",
+     "predicate": "victim_loss"
+    },
+    "V_missing_access_control_disburse": {
+     "truth": "vuln",
+     "predicate": "eth_profit"
+    },
+    "V_reentrancy_unstake": {
+     "truth": "vuln",
+     "predicate": "victim_loss"
+    },
+    "V_unchecked_call_return_buyback": {
+     "truth": "vuln",
+     "predicate": "eth_profit"
+    },
+    "V_weak_randomness_flip_payout": {
+     "truth": "vuln",
+     "predicate": "eth_profit"
+    }
+   },
+   "loose_positives": [
+    {
+     "predicate": "eth_profit",
+     "half": "S",
+     "n": 2
+    },
+    {
+     "predicate": "eth_profit",
+     "half": "V",
+     "n": 3
+    }
+   ],
+   "not_executed": [],
+   "requeued": [
+    {
+     "sample_id": "S_missing_deadline_signed_order",
+     "requeue_number": 1,
+     "requeued_at": "2026-11-22 16:10:49",
+     "stop_reasons": [
+      "error: GatewayError: gave up after 7 attempts; last error: HTTP 500: {\"error\":{\"message\":\"error parsing tool call: raw='",
+      "conclude_safe",
+      "conclude_safe",
+      "conclude_safe"
+     ],
+     "final": {
+      "predicted": "safe",
+      "stop_reasons": [
+       "conclude_safe",
+       "conclude_safe",
+       "conclude_safe",
+       "conclude_safe"
+      ]
+     }
+    },
+    {
+     "sample_id": "V_stale_cached_price_liquidation",
+     "requeue_number": 1,
+     "requeued_at": "2026-11-22 16:10:49",
+     "stop_reasons": [
+      "error: GatewayError: gave up after 7 attempts; last error: HTTP 500: {\"error\":{\"message\":\"error parsing tool call: raw='",
+      "conclude_safe",
+      "conclude_safe",
+      "conclude_safe"
+     ],
+     "final": {
+      "predicted": "safe",
+      "stop_reasons": [
+       "conclude_safe",
+       "conclude_safe",
+       "conclude_safe",
+       "conclude_safe"
+      ]
+     }
+    }
+   ],
+   "analyst": {
+    "minutes": 44.0,
+    "recall_at_budget": {
+     "60": 7.0,
+     "120": 7.0,
+     "180": 7.0,
+     "240": 7.0,
+     "300": 7.0,
+     "420": 7.0,
+     "600": 7.0
+    }
+   },
+   "analyst_strict": {
+    "minutes": 8.0
+   },
+   "cost": {
+    "ledger_requests": 724,
+    "model_served": {
+     "arbiter-gpt:latest": 724
+    },
+    "summary_models_seen": [
+     "arbiter-gpt:latest"
+    ],
+    "prompt_tokens": 8093043,
+    "completion_tokens": 816344,
+    "finish_reasons": {
+     "length": 33,
+     "tool_calls": 583,
+     "stop": 108
+    },
+    "finish_length": 33,
+    "wall_clock_s": 22687.0,
+    "sessions": [
+     "2026-11-22 00:13:34 start me-strict-r1 concurrency=1 resume=0 head=ed4ae05 strict_retry=on",
+     "2026-11-22 06:11:37 end me-strict-r1 rc=0",
+     "2026-11-22 16:10:50 start me-strict-r1 concurrency=1 resume=1 head=ed4ae05 strict_retry=on",
+     "2026-11-22 16:30:54 end me-strict-r1 rc=0"
+    ],
+    "mean_turns": 6.47,
+    "mean_requests_per_sample": 16.55,
+    "no_verdict_rate": 0.0,
+    "no_verdict_rows": 0,
+    "summary_mean_turns": 6.47,
+    "summary_mean_requests_per_sample": 17.35,
+    "summary_no_verdict_rate": 0.0
+   }
+  }
+ },
+ "truth_n": 40,
+ "n_boot": 10000,
+ "seed": 20260726,
+ "summary": {
+  "as_reported": {
+   "repeats": 1,
+   "runs": [
+    {
+     "TP": 7,
+     "TN": 18,
+     "FP": 2,
+     "FN": 13,
+     "precision": 0.7778,
+     "recall": 0.35,
+     "specificity": 0.9,
+     "f1": 0.4828,
+     "accuracy": 0.625,
+     "mcc": 0.2993
+    }
+   ],
+   "TP": {
+    "mean": 7.0,
+    "min": 7,
+    "max": 7
+   },
+   "TN": {
+    "mean": 18.0,
+    "min": 18,
+    "max": 18
+   },
+   "FP": {
+    "mean": 2.0,
+    "min": 2,
+    "max": 2
+   },
+   "FN": {
+    "mean": 13.0,
+    "min": 13,
+    "max": 13
+   },
+   "precision": {
+    "mean": 0.7778,
+    "min": 0.7778,
+    "max": 0.7778
+   },
+   "recall": {
+    "mean": 0.35,
+    "min": 0.35,
+    "max": 0.35
+   },
+   "specificity": {
+    "mean": 0.9,
+    "min": 0.9,
+    "max": 0.9
+   },
+   "f1": {
+    "mean": 0.4828,
+    "min": 0.4828,
+    "max": 0.4828
+   },
+   "accuracy": {
+    "mean": 0.625,
+    "min": 0.625,
+    "max": 0.625
+   },
+   "mcc": {
+    "mean": 0.2993,
+    "min": 0.2993,
+    "max": 0.2993
+   }
+  },
+  "strict_only": {
+   "repeats": 1,
+   "runs": [
+    {
+     "TP": 4,
+     "TN": 20,
+     "FP": 0,
+     "FN": 16,
+     "precision": 1.0,
+     "recall": 0.2,
+     "specificity": 1.0,
+     "f1": 0.3333,
+     "accuracy": 0.6,
+     "mcc": 0.3333
+    }
+   ],
+   "TP": {
+    "mean": 4.0,
+    "min": 4,
+    "max": 4
+   },
+   "TN": {
+    "mean": 20.0,
+    "min": 20,
+    "max": 20
+   },
+   "FP": {
+    "mean": 0.0,
+    "min": 0,
+    "max": 0
+   },
+   "FN": {
+    "mean": 16.0,
+    "min": 16,
+    "max": 16
+   },
+   "precision": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0
+   },
+   "recall": {
+    "mean": 0.2,
+    "min": 0.2,
+    "max": 0.2
+   },
+   "specificity": {
+    "mean": 1.0,
+    "min": 1.0,
+    "max": 1.0
+   },
+   "f1": {
+    "mean": 0.3333,
+    "min": 0.3333,
+    "max": 0.3333
+   },
+   "accuracy": {
+    "mean": 0.6,
+    "min": 0.6,
+    "max": 0.6
+   },
+   "mcc": {
+    "mean": 0.3333,
+    "min": 0.3333,
+    "max": 0.3333
+   }
+  }
+ },
+ "f0": {
+  "constant_yes": {
+   "TP": 20,
+   "TN": 0,
+   "FP": 20,
+   "FN": 0,
+   "precision": 0.5,
+   "recall": 1.0,
+   "specificity": 0.0,
+   "f1": 0.6667,
+   "accuracy": 0.5,
+   "mcc": 0.0
+  },
+  "constant_no": {
+   "TP": 0,
+   "TN": 20,
+   "FP": 0,
+   "FN": 20,
+   "precision": 0.0,
+   "recall": 0.0,
+   "specificity": 1.0,
+   "f1": 0.0,
+   "accuracy": 0.5,
+   "mcc": 0.0
+  }
+ },
+ "section8": {
+  "ref_mcc": 0.2669,
+  "v4_range": [
+   0.118,
+   0.303
+  ],
+  "width": 0.185,
+  "as_reported": {
+   "mccs": [
+    0.2993
+   ],
+   "mean": 0.2993,
+   "gap_to_h2h_arbiter": 0.0324,
+   "within_gap_rule": true,
+   "inside_v4_range": true,
+   "within_variation_range": true,
+   "degraded": false,
+   "range_of_runs": 0.0,
+   "range_wider_than_gap": false
+  },
+  "strict_only": {
+   "mccs": [
+    0.3333
+   ],
+   "mean": 0.3333,
+   "gap_to_h2h_arbiter": 0.0664,
+   "within_gap_rule": true,
+   "inside_v4_range": false,
+   "within_variation_range": true,
+   "degraded": false,
+   "range_of_runs": 0.0,
+   "range_wider_than_gap": false
+  }
+ }
+}

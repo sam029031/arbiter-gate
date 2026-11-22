@@ -35,7 +35,15 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent.parent       # the repository root
 SERVICE_BIN = REPO / "service" / "bin"
-IMAGE = os.environ.get("ARBITER_SANDBOX_IMAGE", "arbiter-sandbox:p3")
+# me1 carries every solc in service/sandbox/solc.lock (0.6.12, 0.7.6, 0.8.0 to 0.8.37); the
+# finals image p3 carried only 0.8.20 and 0.8.37, so an exact pragma such as 0.8.24 could
+# not compile in it (the container can neither download nor write a compiler). p3 is used
+# only when ARBITER_SANDBOX_IMAGE is unset AND me1 has not been built on this machine:
+# that keeps a machine with the finals image working, and the image that actually ran is
+# recorded (gate.json input.sandbox.image) and named in any missing-compiler message.
+DEFAULT_IMAGE = "arbiter-sandbox:me1"
+FALLBACK_IMAGE = "arbiter-sandbox:p3"
+IMAGE = os.environ.get("ARBITER_SANDBOX_IMAGE") or DEFAULT_IMAGE
 LABEL = "arbiter.sandbox=1"
 LOCK = Path(os.environ.get("ARBITER_SANDBOX_LOCK", "/tmp/arbiter-sandbox.lock"))
 JOB_MAX_S = int(os.environ.get("ARBITER_SANDBOX_JOB_MAX", "1800"))
@@ -54,7 +62,11 @@ def enabled(default: bool = False) -> bool:
 
 
 def available() -> tuple[bool, str]:
-    """(usable, reason). Checks the docker CLI, the daemon and the image."""
+    """(usable, reason). Checks the docker CLI, the daemon and the image.
+
+    Also settles IMAGE for the jobs that follow: ARBITER_SANDBOX_IMAGE if set (no
+    fallback), else DEFAULT_IMAGE, else FALLBACK_IMAGE when only that one exists."""
+    global IMAGE
     docker = shutil.which("docker")
     if docker is None:
         return False, "找不到 docker 指令（Docker Desktop 沒有開，或 WSL integration 沒開）"
@@ -65,10 +77,17 @@ def available() -> tuple[bool, str]:
         return False, f"docker 沒有回應（{type(exc).__name__}）"
     if info.returncode != 0:
         return False, "docker daemon 連不上（Docker Desktop 沒有開？）"
-    img = subprocess.run([docker, "image", "inspect", IMAGE, "--format", "{{.Id}}"],
-                         capture_output=True, text=True, timeout=30)
-    if img.returncode != 0:
-        return False, f"沙箱映像 {IMAGE} 不存在（先執行 service/sandbox/build.sh）"
+    def present(tag: str) -> bool:
+        return subprocess.run([docker, "image", "inspect", tag, "--format", "{{.Id}}"],
+                              capture_output=True, text=True, timeout=30).returncode == 0
+    asked = os.environ.get("ARBITER_SANDBOX_IMAGE")
+    wanted = asked or DEFAULT_IMAGE
+    if present(wanted):
+        IMAGE = wanted
+    elif not asked and present(FALLBACK_IMAGE):
+        IMAGE = FALLBACK_IMAGE
+    else:
+        return False, f"沙箱映像 {wanted} 不存在（先執行 service/sandbox/build.sh）"
     return True, ""
 
 

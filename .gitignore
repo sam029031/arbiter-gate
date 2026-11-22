@@ -53,3 +53,12 @@ arbiter/out/
 **/runs/patchstats/
 **/runs/p7b/
 **/runs/p8/
+
+# Meta Earth hackathon (me/): Foundry build output and broadcast logs (may hold RPC URLs),
+# local deployment scratch, keystores never belong here.
+me/contracts/out/
+me/contracts/cache/
+me/contracts/broadcast/
+me/**/node_modules/
+me/**/*.keystore
+me/**/keystores/

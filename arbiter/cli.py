@@ -75,6 +75,10 @@ def main() -> int:
     r.add_argument("--max-turns", type=int, default=26)
     r.add_argument("--max-tokens", type=int, default=4096)
     r.add_argument("--rpm", type=int, default=45)
+    r.add_argument("--strict-retry", action="store_true",
+                   help="after a proof under a loose predicate, run one more audit offered "
+                        "only victim_loss/liveness_broken, briefed with that proof (off by "
+                        "default so earlier runs stay reproducible)")
     r.add_argument("--carry-ruled-out", action="store_true",
                    help="carry failed hypotheses between attempts (measured harmful; off)")
     r.add_argument("--proposals", type=Path, default=None,
@@ -234,6 +238,7 @@ def main() -> int:
             rpm=args.rpm,
             proposals_path=args.proposals,
             carry_ruled_out=args.carry_ruled_out,
+            strict_retry=args.strict_retry,
         )
         _, items = load_evalset(args.evalset)
         truth = truth_map(items)

@@ -19,6 +19,11 @@ Work goes through one background worker (arbiter/jobs.py), one job at a time:
 POST /replay (no job page, straight to the result) stays for scripts/demo_gate.sh.
 Replays follow ARBITER_SANDBOX (default off); see reports/fullplan_p3_*.md.
 
+ME hackathon: a result with an on-chain record (runs/gate/web/<rid>.me.json, written by the
+me/ tools) shows it in a card; GET /verify serves the static verify page from me/web/verify/
+and GET /me/deployments/<network>.json the deployed addresses, both read-only and limited
+to plain file names under those two folders.
+
 Every download goes through gate.public_report, so none carries a host path.
 """
 
@@ -62,8 +67,12 @@ MAX_UNZIPPED = 100 * 1024 * 1024
 MAX_ZIP_FILES = 5000
 FILE_TIMEOUT = 900
 # With check 5 (re-attack, on by default with --repair) a job is up to three audits and two
-# repairs; measured in reports/fullplan_p6_*.md. The limit is raised, the work is not cut.
-REPAIR_TIMEOUT = 3300
+# repairs; measured in reports/fullplan_p6_*.md (3300 s). A proof under a loose predicate is now
+# followed by one strict-only re-proof (gate --strict-retry, on by default: up to --max-turns
+# more requests, about 7 minutes), and a strict success then goes through the whole repair
+# above, so the limit gets that audit plus margin for check 5's technique tracing. The limit is
+# raised, the work is not cut; a job that still hits it is reported as 無法判定（稽核未完成）.
+REPAIR_TIMEOUT = 4500
 _JOB_LOCK = threading.Lock()
 
 # The finals demo's recorded runs; everything else on disk goes into a folded section.
@@ -151,6 +160,76 @@ def load_result(rid: str) -> dict[str, Any] | None:
         return None
     path = WEB / f"{rid}.json"
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def load_me(rid: str) -> dict[str, Any] | None:
+    """The result's on-chain record (BRIEF 4.2, written by the me/ tools), if there is one.
+    Host paths are stripped like every download; anything unreadable is simply not shown."""
+    if not re.fullmatch(r"[0-9a-f]{12}", rid):
+        return None
+    try:
+        me = json.loads((WEB / f"{rid}.me.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(me, dict) or not str(me.get("schema") or "").startswith("arbiter-me/"):
+        return None
+    return public_report(me)
+
+
+def recorded_on(saved: dict[str, Any]) -> str:
+    """The day a recorded run was made, for the result page's banner: the same date the
+    job page's playback banner shows. Saved with the result since this change; for older
+    results, the playback job's params, then the recording's own note (jobs.recorded_date)."""
+    meta = saved.get("meta") or {}
+    day = meta.get("recorded_on")
+    jid = str(meta.get("job") or "")
+    if not day and re.fullmatch(r"[0-9a-f-]{20,40}", jid):
+        day = ((jobs.load(jid) or {}).get("params") or {}).get("recorded_on")
+    inp = saved["report"].get("input") or {}
+    if not day and inp.get("mode") == "from_results" and inp.get("results"):
+        path = Path(inp["results"]) if Path(inp["results"]).is_absolute() else RIG / inp["results"]
+        if path.is_file():
+            day = jobs.recorded_date(path)
+    return day if isinstance(day, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) else ""
+
+
+def result_page(rid: str) -> bytes | None:
+    """GET /result/<rid>, also rendered offline by scripts/webui_probe.py."""
+    saved = load_result(rid)
+    if saved is None:
+        return None
+    saved["meta"] = {**(saved.get("meta") or {}), "recorded_on": recorded_on(saved)}
+    return webui.render_result(saved, rid, result_extras(saved), download_box(saved, rid),
+                               IN_DEVELOPMENT, me=load_me(rid))
+
+
+# -- the ME verify page (static files written by me/web/verify, served as they are) ------------
+
+ME_DIR = RIG.parent / "me"
+VERIFY_DIR = ME_DIR / "web" / "verify"
+DEPLOYMENTS_DIR = ME_DIR / "deployments"
+STATIC_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+                ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
+                ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml",
+                ".png": "image/png", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8"}
+_SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}")
+
+
+def static_file(root: Path, rel: str) -> tuple[bytes, str] | None:
+    """(body, content type) of root/rel, or None. Only plain names (letters, digits, _ . -,
+    not starting with a dot, at most 3 levels), known file types, and a resolved path that
+    is still under root: no "..", no encoded or absolute paths, no symlink out of root."""
+    parts = rel.split("/")
+    if len(parts) > 3 or not all(_SEGMENT.fullmatch(p) for p in parts):
+        return None
+    ctype = STATIC_TYPES.get(Path(parts[-1]).suffix.lower())
+    if ctype is None:
+        return None
+    base = root.resolve()
+    path = (base / Path(*parts)).resolve()
+    if base not in path.parents or not path.is_file():
+        return None
+    return path.read_bytes(), ctype
 
 
 # -- rendering ----------------------------------------------------------------------------
@@ -372,8 +451,10 @@ def run_job(job: dict[str, Any]) -> None:
         return
     else:
         raise ValueError(kind)
-    rid = save_result(report, {"source": source, "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                               "job": job["id"]})
+    meta = {"source": source, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "job": job["id"]}
+    if kind == "playback":
+        meta["recorded_on"] = job["params"]["recorded_on"]
+    rid = save_result(report, meta)
     job = jobs.load(job["id"]) or job
     job["rid"] = rid
     jobs.save(job)
@@ -547,10 +628,22 @@ class Handler(BaseHTTPRequestHandler):
             job = jobs.load(m.group(1))
             if job:
                 return self._send(webui.render_chain(job, chain_runs(job["id"]), True))
+        if path in ("/verify", "/verify/") or path.startswith("/verify/"):
+            got = static_file(VERIFY_DIR, path[len("/verify/"):] or "index.html")
+            if got is None:
+                return self._send(webui.render_missing(
+                    "驗證頁的檔案", "這台機器上還沒有鏈上驗證頁的檔案（me/web/verify/），或網址裡的檔名不正確。"), 404)
+            return self._send(got[0], ctype=got[1])
+        if path.startswith("/me/deployments/"):
+            m = re.fullmatch(r"/me/deployments/([a-z0-9][a-z0-9-]{0,40})\.json", path)
+            got = static_file(DEPLOYMENTS_DIR, f"{m.group(1)}.json") if m else None
+            if got is None:
+                return self._send(webui.render_missing(
+                    "部署紀錄", "還沒有這個網路的部署紀錄（me/deployments/）：AuditRegistry 部署到這個網路之後才會有。"), 404)
+            return self._send(got[0], ctype=got[1])
         m = re.fullmatch(r"/result/([0-9a-f]{12})", path)
-        if m and (saved := load_result(m.group(1))):
-            return self._send(webui.render_result(saved, m.group(1), result_extras(saved),
-                                                  download_box(saved, m.group(1)), IN_DEVELOPMENT))
+        if m and (body := result_page(m.group(1))):
+            return self._send(body)
         m = re.fullmatch(r"/result/([0-9a-f]{12})/chainreplay/(\d+)-(\d+)", path)
         if m and (saved := load_result(m.group(1))):
             hit = _finding_at(saved, int(m.group(2)), int(m.group(3)))
@@ -592,7 +685,9 @@ class Handler(BaseHTTPRequestHandler):
             report, err = run_gate_cli(argv, timeout=600)
             if report is None:
                 return self._index(f"重播沒有產生結果：{err}", 500)
-            rid = save_result(report, {"source": source, "at": time.strftime("%Y-%m-%d %H:%M:%S")})
+            meta = {"source": source, "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+            meta["recorded_on"] = recorded_on({"meta": meta, "report": report})
+            rid = save_result(report, meta)
             return self._redirect(f"/result/{rid}")
         if self.path == "/upload":
             name, data = self._upload(body)

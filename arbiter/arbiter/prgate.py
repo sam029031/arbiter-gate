@@ -41,7 +41,10 @@ from pathlib import Path
 from typing import Any
 
 from .diffscan import git_diff, parse_diff, scope_from_diff
+from .sarif import strict_retry_text
+from .technique import NOVEL, describe
 from .triage import triage_all
+from .units import format_amount
 from .verdict import LABELS, NO_PROVABLE, NOT_EXECUTED, PROVEN, STATIC_HINT
 
 COMMENT_MARKER = "<!-- arbiter-gate:comment -->"
@@ -330,12 +333,22 @@ def _eth(v: Any) -> str:
 
 
 def _abg_table(envs: list[dict[str, Any]]) -> list[str]:
-    rows = ["| 情境 | 受害者初始餘額 | 經過時間 | 攻擊回合 | A 沒攻擊時取回 | B 有攻擊時取回 | G 攻擊者獲利 |",
-            "|---|---|---|---|---|---|---|"]
+    # Amounts carry their unit (ether, or the token the proof measured); the owner's claim
+    # columns appear only for a proof that has one (treasury_exit).
+    owner = any("TA" in r for r in envs)
+    rows = ["| 情境 | 受害者初始餘額 | 經過時間 | 攻擊回合 | A 沒攻擊時取回 | B 有攻擊時取回 | G 攻擊者獲利 |"
+            + (" TA 金庫沒攻擊時取回 | TB 金庫有攻擊時取回 |" if owner else ""),
+            "|---|---|---|---|---|---|---|" + ("---|---|" if owner else "")]
     for r in envs:
-        rows.append(f"| {r.get('env')} | {_eth(r.get('endow_wei'))} ETH | {r.get('warp_s')} 秒 | "
-                    f"{r.get('rounds')} | {_eth(r.get('A'))} ETH | {_eth(r.get('B'))} ETH | "
-                    f"{_eth(r.get('G'))} ETH |")
+        u = r.get("unit")
+        endow = (f"{_eth(r.get('endow_wei'))} ETH" if u in (None, "wei")
+                 else format_amount(r.get("endow_wei"), u, zh=True))
+        rows.append(f"| {r.get('env')} | {endow} | {r.get('warp_s')} 秒 | "
+                    f"{r.get('rounds')} | {format_amount(r.get('A'), u, zh=True)} | "
+                    f"{format_amount(r.get('B'), u, zh=True)} | "
+                    f"{format_amount(r.get('G'), u, zh=True)} |"
+                    + (f" {format_amount(r.get('TA'), u, zh=True)} | "
+                       f"{format_amount(r.get('TB'), u, zh=True)} |" if owner else ""))
     return rows
 
 
@@ -388,7 +401,10 @@ def overall(report: dict[str, Any]) -> tuple[str, str]:
 _CHECK_ZH = {"0": "重現", "L": "改得乾淨", "3": "介面不變", "1": "同一招失效",
              "2": "一般使用者不受影響", "4": "專案自己的測試", "5": "換手法再攻擊"}
 _STATUS_ZH = {"pass": "通過", "fail": "沒通過", "skipped": "沒有跑（不算通過）",
-              "not_applicable": "不適用（單一檔案）", "off": "沒有開", "not_reached": "沒有輪到"}
+              "not_applicable": "不適用（單一檔案）", "off": "沒有開", "not_reached": "沒有輪到",
+              "not_diverse": "AI 沒有換手法（不算通過）"}
+_NOT_DIVERSE_NOTE = ("系統比對了再攻擊時每個攻擊程式的執行軌跡：用的都是之前已證實的手法（只是換了寫法），"
+                     "所以不算「換手法再攻擊」通過。修補本身仍通過檢查 0～4，是目前找到的最好修補。")
 
 
 def _rounds_markdown(p: dict[str, Any]) -> list[str]:
@@ -415,8 +431,16 @@ def _rounds_markdown(p: dict[str, Any]) -> list[str]:
                 hyp = (e.get("hypothesis") or "").replace("|", "\\|")
                 if e.get("source") == "reattack" and e.get("result") != "proven":
                     detail = f"{e.get('turns')} 回合、{e.get('elapsed_s')} 秒"
+                    if "attempts" in e:
+                        new = sum(a.get("novelty") in NOVEL for a in e["attempts"])
+                        detail += f"；試了 {len(e['attempts'])} 個攻擊，{new} 個是新手法"
                 else:
                     detail = f"假設：{hyp[:160]}" if hyp else ""
+                fp = e.get("fingerprint") or next(
+                    (a.get("fingerprint") for a in e.get("attempts") or []
+                     if a.get("passed") and e.get("result") == "proven"), None)
+                if fp:
+                    detail += "；軌跡：" + describe(fp, zh=True).replace("|", "\\|")[:160]
             else:
                 who = "修補"
                 detail = f"{e.get('proposals')} 個提案"
@@ -424,7 +448,9 @@ def _rounds_markdown(p: dict[str, Any]) -> list[str]:
         ra = p.get("reattack") or {}
         if ra.get("label"):
             out += ["", f"**{ra['label']}**。" + ("「未成功」只代表這一次換手法沒有找到能成功的攻擊，"
-                                                   "不代表合約安全。" if ra.get("status") == "pass" else "")]
+                                                   "不代表合約安全。" if ra.get("status") == "pass" else
+                                                   _NOT_DIVERSE_NOTE if ra.get("status") == "not_diverse"
+                                                   else "")]
     return out
 
 
@@ -469,6 +495,8 @@ def comment_markdown(report: dict[str, Any], *, run_url: str = "") -> str:
                     f"- 證實方式：攻擊程式在模擬區塊鏈上執行，滿足 `{f.get('predicate')}`（攻擊證明 `{f.get('poc_name')}`）"]
             if f.get("predicate_note"):
                 out.append(f"- {f['predicate_note']}")
+            if retry := strict_retry_text(f.get("strict_retry")):
+                out.append(f"- {retry}")
             abg = f.get("abg") or {}
             out.append(f"- 損失重現（A/B/G）：{abg.get('label')}"
                        + (f"（{abg['note']}）" if abg.get("note") else ""))

@@ -133,7 +133,12 @@ def main() -> int:
     ap.add_argument("--evalset", type=Path, default=HERE.parent / "evalsets" / "v3_authored.json")
     ap.add_argument("--out", type=Path, default=HERE.parent / "runs" / "p7b" / "metrics.json")
     ap.add_argument("--slither", action="store_true")
+    ap.add_argument("--run-ids", default=",".join(RUN_IDS),
+                    help="comma separated; default the three P7b runs. The ME run is scored "
+                         "with the same definitions: --run-ids me-strict-r1 "
+                         "(PREREGISTRATION_me_strict.md)")
     a = ap.parse_args()
+    run_ids = tuple(r.strip() for r in a.run_ids.split(",") if r.strip())
 
     assert set(STRICT_PREDICATES) == {"victim_loss", "liveness_broken"}, STRICT_PREDICATES
     evalset = json.loads(a.evalset.read_text(encoding="utf-8"))
@@ -142,7 +147,7 @@ def main() -> int:
 
     out: dict = {"runs": {}, "truth_n": len(truth), "n_boot": N_BOOT, "seed": SEED}
     reported_all, strict_all = [], []
-    for rid in RUN_IDS:
+    for rid in run_ids:
         rows = load(a.runs_dir / f"{rid}.results.jsonl")
         summ = json.loads((a.runs_dir / f"{rid}.summary.json").read_text(encoding="utf-8"))
         ledger = load(a.runs_dir / f"{rid}.ledger.jsonl")
@@ -247,7 +252,7 @@ def main() -> int:
     for kind in ("as_reported", "strict_only"):
         print(f"\n== {kind} (arbiter-gpt, TUNE)")
         print(f"{'run':14s}{'TP':>4}{'TN':>4}{'FP':>4}{'FN':>4}" + "".join(f"{m:>13s}" for m in METRICS))
-        for rid in RUN_IDS:
+        for rid in run_ids:
             r = out["runs"][rid][kind]
             print(f"{rid:14s}{r['TP']:>4}{r['TN']:>4}{r['FP']:>4}{r['FN']:>4}" +
                   "".join(f"{r[m]:>13.4f}" for m in METRICS))
@@ -257,7 +262,7 @@ def main() -> int:
             print(f"{agg:14s}" + "".join(f"{s[k][agg]:>6.4g}" for k in ("TP", "TN", "FP", "FN")) +
                   "".join(f"{s[m][agg]:>13.4f}" for m in METRICS))
     print("\nsection 8:", json.dumps(out["section8"], ensure_ascii=False))
-    for rid in RUN_IDS:
+    for rid in run_ids:
         r = out["runs"][rid]
         print(f"\n{rid}: loose positives {r['loose_positives']}")
         print(f"  not_executed {[(x['sample_id'], x['reason'][:60]) for x in r['not_executed']]}")

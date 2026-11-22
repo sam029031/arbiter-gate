@@ -1,0 +1,73 @@
+{
+ "schema": "arbiter-gate/0.1",
+ "generated_at": "2026-11-21T23:35:33+0800",
+ "input": {
+  "mode": "project",
+  "run_id": "dogfood-escrow-2",
+  "workspace_mode": "repo",
+  "target": "src/AuditEscrow.sol",
+  "target_chosen_by": "user",
+  "candidates": [],
+  "llm_requests_this_invocation": 15,
+  "usage": {
+   "requests": 15,
+   "prompt_tokens": 234399,
+   "completion_tokens": 14720,
+   "cost_usd": 0.0,
+   "retries": 0,
+   "http_errors": 0,
+   "parse_failures": 0,
+   "reasoning_recoveries": 12,
+   "system_fingerprints": [
+    "fp_ollama"
+   ],
+   "models_seen": [
+    "arbiter-gpt:latest"
+   ]
+  },
+  "results": "runs/gate/dogfood-escrow-2/dogfood-escrow-2.results.jsonl",
+  "llm_requests_audit": 15,
+  "llm_requests_repair": 0,
+  "sandbox": {
+   "status": "off"
+  }
+ },
+ "models": [
+  "arbiter-gpt:latest"
+ ],
+ "patches_file": null,
+ "repair": true,
+ "exit_code": 0,
+ "files": [
+  {
+   "id": "project::src/AuditEscrow.sol",
+   "path": "runs/gate/dogfood-escrow-2/project/src/AuditEscrow.sol",
+   "artifact": {
+    "uri": "src/AuditEscrow.sol",
+    "sha256": "ce077a36cca583d15b8f07242d5e515c4a093d7ff7d17fbb6afd45cc65e3c33e"
+   },
+   "verdict": "no_provable_attack",
+   "label": "未發現可證明攻擊（不等於安全）",
+   "reason": "agent_concluded_no_attack",
+   "detail": "",
+   "turns": 15,
+   "elapsed_s": 455.35,
+   "static_analysis": {
+    "status": "not_run",
+    "label": "靜態分析未執行",
+    "reason": "slither 沒有產生結果：  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+    "tool": "slither 0.11.6",
+    "solc": "0.8.24",
+    "threshold": "impact ≥ Medium 且 confidence ≥ Medium",
+    "findings_total": 0,
+    "hints": []
+   },
+   "fixture_note": "",
+   "static_hints": [],
+   "hint_note": "",
+   "findings": []
+  }
+ ],
+ "elapsed_s": 459.98,
+ "note": "已證實可攻擊的判定附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。"
+}

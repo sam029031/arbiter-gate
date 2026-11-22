@@ -12,10 +12,13 @@ from __future__ import annotations
 import difflib
 import html
 import json
+import re
 import time
+import urllib.parse
 from typing import Any
 
 from .progress import STEPS
+from .solc_avail import MISSING_RE
 from .verdict import LABELS, NO_PROVABLE, NOT_EXECUTED, PROVEN, STATIC_HINT
 
 ENV_NAMES = ["預設", "受害者餘額 1000 倍", "一週後", "8 輪攻擊"]
@@ -36,7 +39,7 @@ CHECKS = [
 ]
 CHECK_WORDS = {"pass": "通過", "fail": "沒通過", "skipped": "沒有跑（不算通過）",
                "not_applicable": "不適用（單一檔案）", "off": "這次沒有開",
-               "not_reached": "沒有輪到"}
+               "not_reached": "沒有輪到", "not_diverse": "AI 沒有換手法（不算通過）"}
 GLOSSARY = {
     "ETH": "以太坊上的錢（以太幣）。",
     "智能合約": "放在區塊鏈上、會自動執行的程式；部署之後通常不能再改。",
@@ -58,6 +61,12 @@ GLOSSARY = {
     "forge": "編譯和測試智能合約的工具（Foundry）。",
     "合成層": "在測試框架裡模擬：可以用特殊指令直接準備帳戶和金額。",
     "PoC": "概念驗證程式：真的能跑起來、證明漏洞存在的攻擊程式。",
+    "測試網": "給開發測試用的公開區塊鏈：交易是真的、任何人都查得到，但上面的幣沒有實際價值。",
+    "交易雜湊": "每筆鏈上交易的編號（0x 開頭的一串十六進位）。ME 的區塊鏈瀏覽器用同一筆交易的 Cosmos 編號查詢，這一頁的連結已經換好；也可以拿 0x 編號直接向節點查。",
+    "鏈上紀錄": "寫進區塊鏈、之後不能修改的紀錄：哪個帳戶、在什麼時候、登記了什麼判定和證據雜湊。它不證明判定是對的，對不對要重跑證據確認。",
+    "雜湊": "檔案的指紋：內容改一個字，雜湊就完全不同。拿下載的檔案重算一次，就能比對是不是同一份。",
+    "CREATE2": "一種部署合約的方式：位址由部署者、程式碼和一個指定值算出來，程式碼改一個字，位址就不同。",
+    "托管": "稽核費先放在鏈上合約裡：稽核完成就付給稽核者，沒有完成就退回給付款人。",
 }
 
 
@@ -77,6 +86,102 @@ def term(word: str, key: str | None = None) -> str:
     if not tip:
         return esc(word)
     return f"<span class='term' tabindex='0' data-tip='{esc(tip)}'>{esc(word)}</span>"
+
+
+def _int(v: Any) -> int | None:
+    """An amount from gate.json: an int, or a decimal string (big ERC-20 amounts)."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v
+    if isinstance(v, str) and re.fullmatch(r"-?\d+", v.strip()):
+        return int(v)
+    return None
+
+
+def _fixed(v: int, decimals: int, places: int = 6) -> str:
+    """v / 10**decimals rounded to `places`, in integers (no float rounding on big amounts)."""
+    sign, v = ("-" if v < 0 else ""), abs(v)
+    if decimals <= places:
+        q = v * 10 ** (places - decimals)
+    else:
+        d = 10 ** (decimals - places)
+        q = (v + d // 2) // d
+    whole, frac = divmod(q, 10 ** places)
+    return sign + f"{whole:,}" + (("." + f"{frac:0{places}d}".rstrip("0")) if frac else "")
+
+
+def amount(v: Any, unit: Any = None) -> str:
+    """An amount in its scenario's unit (gate.json abg.environments[].unit): wei as ETH,
+    or {"token": symbol or address, "decimals": n} for an ERC-20 amount."""
+    if not isinstance(unit, dict):
+        return eth(_int(v)) if v is not None else "—"
+    n = _int(v)
+    if n is None:
+        return "—"
+    try:
+        decimals = min(max(int(unit.get("decimals") or 0), 0), 77)
+    except (TypeError, ValueError):
+        decimals = 0
+    sym = str(unit.get("token") or "代幣")
+    if re.fullmatch(r"0x[0-9a-fA-F]{40}", sym):
+        sym = f"{sym[:6]}…{sym[-4:]}"
+    return f"{_fixed(n, decimals)} {sym}"
+
+
+# Internal notes the pipeline writes in English (gate.py, patch.py), in plain words. A note
+# already written in Chinese is shown as it is; English that is not listed here appears only
+# inside 技術細節, never as page text.
+_CJK = re.compile(r"[㐀-鿿]")
+NOTE_WORDS: list[tuple[str, str]] = [
+    (r"exploit does not compile on the original", "攻擊程式在原合約上編譯失敗，無法重現"),
+    (r"not_reproducible", "攻擊程式在原合約上重跑時沒有成功，無法重現"),
+    (r"predicate '?(\w+)'? is not patched.*",
+     "這次是用寬鬆條件 {0} 證實的；損失數字（A/B/G）和修補目前只支援「受害者少拿回錢」（victim_loss）這類嚴格條件"),
+    (r"only victim_loss and liveness_broken exploits are patched",
+     "修補目前只支援 victim_loss 和 liveness_broken 這兩種嚴格條件"),
+    (r"row has no passed, adjudicated PoC", "結果檔裡找不到通過系統判定的攻擊程式，沒辦法重跑"),
+    (r"exploit does not import .*", "攻擊程式沒有引用被稽核的合約檔，沒辦法在原合約上重跑"),
+    (r"target has imports and its repository is no longer on disk",
+     "這份合約有 import，但它所在的專案已經不在這台機器上，沒辦法重跑"),
+    (r"recorded patch no longer passes the gate \(first failure: check (\w+)\)",
+     "錄製時的修補這次重新驗證沒有通過（第一個沒通過的是檢查 {0}）"),
+    (r"exploit does not compile against the patch.*", "攻擊程式對修補後的合約編譯不過"),
+    (r"the honest operation (?:now|already) fails.*", "沒有攻擊時，一般使用者的操作也失敗了"),
+    (r"the re-attack did not run", "再攻擊沒有開始執行"),
+    (r"toolchain_unavailable.*", "這台機器找不到編譯工具（forge）"),
+]
+
+
+def plain_note(note: Any) -> str:
+    """A pipeline note in zh-TW, or "" when there is no plain-words version of it."""
+    raw = " ".join(str(note or "").split())
+    if not raw:
+        return ""
+    if _CJK.search(raw):
+        return raw
+    if m := re.fullmatch(r"(\d+) round\(s\), refusals (.*)", raw):
+        failed = re.findall(r"'(\w+)': (\d+)", m.group(2))
+        return (f"AI 試了 {m.group(1)} 輪修補，都沒有通過修補閘門的檢查"
+                + (f"（沒通過的檢查：{'、'.join(f'檢查 {k} 共 {n} 次' for k, n in failed)}）" if failed else ""))
+    for pattern, words in NOTE_WORDS:
+        if m := re.fullmatch(pattern, raw):
+            return words.format(*m.groups())
+    k = reason_key(raw)
+    return REASONS.get(k, "")
+
+
+def note_html(note: Any, prefix: str = "") -> str:
+    """A pipeline note as a block of page text: zh-TW in front, the original English (if
+    any) folded under 技術細節."""
+    raw = str(note or "").strip()
+    if not raw:
+        return ""
+    zh = plain_note(raw)
+    text = esc(zh) if zh else "原因沒有對應的白話說明（原始訊息見技術細節）"
+    tech = ("" if _CJK.search(raw) else
+            f"<details><summary>技術細節</summary><pre style='white-space:pre-wrap'>{esc(raw)}</pre></details>")
+    return f"<div class='note'>{prefix}{text}{tech}</div>"
 
 
 CSS = """
@@ -134,13 +239,18 @@ box-shadow:0 0 0 3px var(--bluebg)}
 .lamp{width:18px;height:18px;border-radius:50%;background:var(--greybg);border:2px solid var(--line);margin-top:3px}
 .lamp.pass{background:#2e9d5b;border-color:#2e9d5b}.lamp.fail{background:var(--red);border-color:var(--red)}
 .lamp.skipped,.lamp.not_reached{background:var(--line)}.lamp.not_applicable,.lamp.off{background:var(--bg);border-style:dashed}
+.lamp.not_diverse{background:var(--amber);border-color:var(--amber)}
+.envt .tag{white-space:normal;margin-left:0}
+.tag.lg{font-size:14px;padding:2px 9px;margin-left:0;white-space:normal}.hash{font-family:ui-monospace,Consolas,monospace;font-size:13px;word-break:break-all}.hash.short{word-break:normal;white-space:nowrap}
+a{color:var(--blue)}.card>h2:first-child{margin-top:0}.sbs>div,dd{min-width:0}
+.attempts{list-style:none;padding:0;margin:8px 0}.attempts li{border-bottom:1px solid var(--line);padding:6px 2px}.attempts .tag{margin:0 6px 0 0}
 .lamp.wait{animation:pulse 1s infinite;border-color:var(--blue)}
 .tl{display:flex;flex-wrap:wrap;gap:6px;align-items:stretch;margin:10px 0}.tl .arrow{align-self:center;color:var(--mute)}
 .tl details{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--card);min-width:150px;max-width:100%}
 .tl details[open]{flex-basis:100%}.tl summary{cursor:pointer;font-weight:700}.tl .r{font-size:12px;color:var(--mute);display:block}
 .tl .att.proven{border-color:var(--red)}.tl .att.proven summary{color:var(--red)}.tl .def.accepted summary{color:#2e9d5b}
 .tl .att.not_proven summary{color:#2e9d5b}.tl .def.rejected summary,.tl .att.not_executed summary{color:var(--amber)}
-.bars{display:grid;gap:8px;margin:12px 0}.bar{display:grid;grid-template-columns:150px 1fr 90px;gap:8px;align-items:center;font-size:14px}
+.bars{display:grid;gap:8px;margin:12px 0}.bar{display:grid;grid-template-columns:150px 1fr minmax(90px,max-content);gap:8px;align-items:center;font-size:14px}
 .bar .track{background:var(--greybg);border-radius:6px;height:22px;overflow:hidden}
 .bar .fill{height:100%;border-radius:6px}.fill.a{background:#6b9bd1}.fill.b{background:#e07a5f}.fill.g{background:#9a6fb0}
 .story{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:8px;align-items:stretch;margin:12px 0}
@@ -157,9 +267,16 @@ border:2px solid var(--line);border-radius:10px;padding:10px 12px;background:var
 .cards h2{margin:0;font-size:19px}.big{font-size:17px}
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .demo{display:block;width:100%;text-align:left;margin:6px 0}
+.mechain{list-style:none;padding:0;margin:12px 0;display:flex;flex-wrap:wrap;gap:10px 26px}
+.mechain li{position:relative;flex:1 1 150px;min-width:0;border:1px solid var(--line);border-top:4px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--card)}
+.mechain li+li::before{content:"→";position:absolute;left:-20px;top:calc(50% - .8em);color:var(--mute);font-size:18px}
+.mechain .sub{color:var(--mute);font-size:13px;line-height:1.45;margin:3px 0 0;overflow-wrap:anywhere}
+.mechain li.bad{border-top-color:var(--red)}.mechain li.bad>b{color:var(--red)}.mechain li.ok{border-top-color:#2e9d5b}.mechain li.ok>b{color:var(--green)}
+.mechain li.warn{border-top-color:var(--amber)}.mechain li.warn>b{color:var(--amber)}.mechain li.info{border-top-color:var(--blue)}.mechain li.info>b{color:var(--blue)}
 @media (max-width:760px){.cards,.cols,.sbs,.story{grid-template-columns:1fr}.story .arrow{transform:rotate(90deg);justify-self:center}
+.mechain{flex-direction:column;gap:24px}.mechain li{flex:none}.mechain li+li::before{content:"↓";left:calc(50% - .3em);top:-25px}
 .steps{grid-template-columns:repeat(4,1fr)}.light{grid-template-columns:22px 1fr}.light .what{grid-column:2}
-.bar{grid-template-columns:110px 1fr 70px}.vcard{grid-template-columns:44px 1fr}.vcard .icon{width:40px;height:40px;font-size:22px}}
+.bar{grid-template-columns:110px 1fr minmax(70px,max-content)}.bar b{overflow-wrap:anywhere}.vcard{grid-template-columns:44px 1fr}.vcard .icon{width:40px;height:40px;font-size:22px}}
 """
 
 
@@ -209,6 +326,26 @@ VCLASS = {PROVEN: "v-proven", STATIC_HINT: "v-hint", NO_PROVABLE: "v-none", NOT_
 ICON = {PROVEN: "!", STATIC_HINT: "?", NO_PROVABLE: "i", NOT_EXECUTED: "…"}
 
 
+NEXT_PROVEN = {
+    "verified": "建議先不要部署。參考下方的修補，修好後重新稽核一次。",
+    "loose": "建議先不要部署。這個攻擊是用比較寬鬆的條件證實的，系統不會為這類結果產生修補；請人工修好後重新稽核一次。",
+    "reproduction_failed": "建議先不要部署。系統重跑這個攻擊時沒有重現（原因見下方），所以沒有進行修補；請人工修好後重新稽核一次。",
+    "no_patch": "建議先不要部署。AI 這次沒有產生通過檢查的修補；請人工修好後重新稽核一次。",
+}
+
+
+def proven_next(findings: list[dict[str, Any]]) -> str:
+    """The red box's advice: "see the patch below" only when a verified patch is below."""
+    f0 = findings[0] if findings else {}
+    if any((f.get("patch") or {}).get("status") == "verified" for f in findings):
+        return NEXT_PROVEN["verified"]
+    if f0.get("predicate") and not f0.get("predicate_strict"):
+        return NEXT_PROVEN["loose"]
+    if (f0.get("abg") or {}).get("status") == "reproduction_failed":
+        return NEXT_PROVEN["reproduction_failed"]
+    return NEXT_PROVEN["no_patch"]
+
+
 def verdict_card(e: dict[str, Any]) -> str:
     v = e["verdict"]
     f0 = (e.get("findings") or [{}])[0]
@@ -218,7 +355,9 @@ def verdict_card(e: dict[str, Any]) -> str:
                 + ("有攻擊時，一般使用者領回的錢比沒有攻擊時少，差額落到攻擊者手上；也就是說，有人可以把其他存款人的錢領走。"
                    if not loose else
                    f"（這次是用較寬鬆的條件 {esc(f0.get('predicate'))} 證實：攻擊者拿到了比一般使用者多的錢；沒有量受害者少拿多少。）"))
-        nxt = "建議先不要部署。參考下方的修補，修好後重新稽核一次。"
+        if (f0.get("abg") or {}).get("status") == "reproduction_failed":
+            mean += "這是稽核當時系統執行攻擊的判定；之後系統在 4 種情境重跑時沒有重現，所以下方沒有損失數字。"
+        nxt = proven_next(e.get("findings") or [])
     elif v == STATIC_HINT:
         mean = ("自動掃描工具（" + term("Slither") + "）覺得這裡可疑，但 AI 沒能寫出真的能成功的攻擊。"
                 "這是提示，不是證據。")
@@ -231,15 +370,52 @@ def verdict_card(e: dict[str, Any]) -> str:
         k = reason_key(e.get("reason"))
         mean = f"稽核沒有完成：{esc(plain_reason(e.get('reason')))}。所以這份合約沒有任何結論，不能當成通過。"
         nxt = NEXT_UNRUN.get(k, "請看下方技術細節的錯誤訊息，處理後再試一次。")
+        if k == "context_unbuildable" and MISSING_RE.match(str(e.get("detail") or "")):
+            # The contract may be fine: the sandbox lacks the compiler its pragma asks for.
+            why = str(e["detail"]).removeprefix("context_unbuildable: ")
+            net = "（沙箱不能連網，沒辦法臨時下載編譯器）" if why.startswith("沙箱裡沒有") else ""
+            mean = (f"稽核沒有完成：{esc(why)}{net}，所以稽核沒有開始。"
+                    "合約本身不一定有問題，但這次沒有任何結論，不能當成通過。")
+            nxt = "可以把合約的 pragma 改成上面列出的其中一個版本再上傳。"
     return (f"<div class='vcard {VCLASS[v]}'><div class='icon'>{ICON[v]}</div>"
             f"<h2>{esc(LABELS[v])}</h2><div class='mean'>{mean}</div>"
-            f"<div class='next'>建議：{nxt}</div></div>")
+            f"<div class='next'>{nxt if nxt.startswith('建議') else '建議：' + nxt}</div></div>")
 
 
 # -- the story: A/B/G as pictures ---------------------------------------------------------
 
-def _harmed(envs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [r for r in envs if r.get("A") is not None and r.get("B") is not None and r["B"] < r["A"]]
+def harm(r: dict[str, Any]) -> tuple[str, str]:
+    """(kind, whose) for one scenario, by the victim_loss rule the harness itself applies
+    (workspace._VICTIM_FAIL): harmed only if the victim got back less (B < A) AND the
+    attacker holds at least that shortfall (G >= A - B). kind is harmed | short (got back
+    less, but the attacker does not hold it: not an attack) | none | unmeasured. Without
+    A/B, the treasury columns TA/TB (when measured) are judged the same way."""
+    whose, a, b = "victim", _int(r.get("A")), _int(r.get("B"))
+    if (a is None or b is None) and _int(r.get("TA")) is not None and _int(r.get("TB")) is not None:
+        whose, a, b = "treasury", _int(r.get("TA")), _int(r.get("TB"))
+    if a is None or b is None:
+        return "unmeasured", whose
+    if b >= a:
+        return "none", whose
+    g = _int(r.get("G"))
+    return ("harmed" if g is not None and g > 0 and g >= a - b else "short"), whose
+
+
+HARM_TAGS = {
+    ("harmed", "victim"): ("bad", "受害者受損（攻擊者多拿的 ≥ 受害者少拿的）"),
+    ("harmed", "treasury"): ("bad", "公庫受損（攻擊者多拿的 ≥ 公庫少掉的）"),
+    ("short", "victim"): ("warn", "受害者少拿，但攻擊者沒拿到相應的錢（不算攻擊成立）"),
+    ("short", "treasury"): ("warn", "公庫少了錢，但攻擊者沒拿到相應的錢（不算攻擊成立）"),
+    ("none", "victim"): ("", "沒有受損"),
+    ("none", "treasury"): ("", "沒有受損"),
+    ("unmeasured", "victim"): ("", "沒有量到"),
+    ("unmeasured", "treasury"): ("", "沒有量到"),
+}
+
+
+def harm_tag(r: dict[str, Any]) -> str:
+    cls, words = HARM_TAGS[harm(r)]
+    return f"<span class='tag {cls}'>{esc(words)}</span>"
 
 
 def story(f: dict[str, Any]) -> str:
@@ -247,33 +423,40 @@ def story(f: dict[str, Any]) -> str:
     envs = abg.get("environments") or []
     if abg.get("status") != "measured" or not envs:
         return ""
-    harmed = _harmed(envs)
+    harmed = [e for e in envs if harm(e) == ("harmed", "victim")]
     r = harmed[0] if harmed else envs[0]
+    u = r.get("unit")
     name = ENV_NAMES[r["env"]] if r["env"] < len(ENV_NAMES) else str(r["env"])
-    top = max(r["A"] or 0, r["B"] or 0, r["G"] or 0, 1)
+    top = max(_int(r.get("A")) or 0, _int(r.get("B")) or 0, _int(r.get("G")) or 0, 1)
 
-    def bar(label: str, v: int | None, cls: str) -> str:
-        w = 0 if not v else max(2, round(100 * v / top))
+    def bar(label: str, v: Any, cls: str) -> str:
+        n = _int(v)
+        w = 0 if not n or n < 0 else max(2, round(100 * n / top))
         return (f"<div class='bar'><span>{label}</span><div class='track'><div class='fill {cls}' "
-                f"style='width:{w}%'></div></div><b>{eth(v)}</b></div>")
+                f"style='width:{w}%'></div></div><b>{amount(v, u)}</b></div>")
     others = [e for e in envs if e not in harmed]
+    normal = [e for e in others if harm(e)[0] == "none"]
+    short = [e for e in others if harm(e)[0] == "short"]
     extra = ""
-    if harmed and others:
-        g = sorted({e["G"] for e in others if e.get("G")})
-        extra = (f"<p class='note'>另外 {len(others)} 種情境裡，受害者照常領回"
-                 + (f"，但攻擊者仍多拿了 {' / '.join(eth(x) for x in g)}（來自合約裡其他人的錢）" if g else "")
-                 + "。</p>")
+    if harmed and normal:
+        g = sorted({_int(e.get("G")) for e in normal if _int(e.get("G"))})
+        extra += (f"<p class='note'>另外 {len(normal)} 種情境裡，受害者照常領回"
+                  + (f"，但攻擊者仍多拿了 {' / '.join(amount(x, u) for x in g)}（來自合約裡其他人的錢）" if g else "")
+                  + "。</p>")
+    if harmed and short:
+        extra += (f"<p class='note'>另外 {len(short)} 種情境裡，受害者少拿回了錢，但攻擊者沒有拿到相應的錢，"
+                  "依判定條件不算攻擊成立。</p>")
     return f"""
 <h2>發生了什麼事</h2>
 <div class='card'>
 <div class='story'>
- <div class='box'><b>1. 一般使用者</b><br>存錢進合約，之後領回。沒有攻擊時，他領回 <b>{eth(r['A'])}</b>。</div>
+ <div class='box'><b>1. 一般使用者</b><br>存錢進合約，之後領回。沒有攻擊時，他領回 <b>{amount(r.get('A'), u)}</b>。</div>
  <div class='arrow'>→</div>
  <div class='box'><b>2. 攻擊者</b><br>用 AI 寫的攻擊程式（{term('重入')}等手法）呼叫合約。<br><span class='note'>AI 的描述：{esc(f.get('title'))}</span></div>
  <div class='arrow'>→</div>
- <div class='box'><b>3. 結果</b><br>同一個使用者只領回 <b>{eth(r['B'])}</b>，攻擊者多了 <b>{eth(r['G'])}</b>。</div>
+ <div class='box'><b>3. 結果</b><br>同一個使用者只領回 <b>{amount(r.get('B'), u)}</b>，攻擊者多了 <b>{amount(r.get('G'), u)}</b>。</div>
 </div>
-<div class='bars'>{bar('沒攻擊時領回', r['A'], 'a')}{bar('有攻擊時領回', r['B'], 'b')}{bar('攻擊者多拿', r['G'], 'g')}</div>
+<div class='bars'>{bar('沒攻擊時領回', r.get('A'), 'a')}{bar('有攻擊時領回', r.get('B'), 'b')}{bar('攻擊者多拿', r.get('G'), 'g')}</div>
 <p class='note'>上面是「{esc(name)}」情境（{esc(ENV_DESC[r['env']] if r['env'] < len(ENV_DESC) else '')}）。</p>{extra}
 </div>"""
 
@@ -282,25 +465,31 @@ def env_table(abg: dict[str, Any], idx: int) -> str:
     envs = abg.get("environments") or []
     if not envs:
         return ""
+    treasury = any("TA" in r or "TB" in r for r in envs)
     rows = []
     for r in envs:
         name = ENV_NAMES[r["env"]] if r["env"] < len(ENV_NAMES) else str(r["env"])
-        harmed = r.get("A") is not None and r.get("B") is not None and r["B"] < r["A"]
-        tag = "<span class='tag bad'>受害者受損</span>" if harmed else "<span class='tag'>沒有受損</span>"
-        def cell(v: int | None, what: str) -> str:
-            text = f"「{name}」情境：{what} {eth(v)}。{ENV_DESC[r['env']] if r['env'] < len(ENV_DESC) else ''}"
+        u = r.get("unit")
+
+        def cell(v: Any, what: str) -> str:
+            text = f"「{name}」情境：{what} {amount(v, u)}。{ENV_DESC[r['env']] if r['env'] < len(ENV_DESC) else ''}"
             return (f"<td class='num cell' title='{esc(text)}' data-explain='{esc(text)}' "
-                    f"onclick=\"explain(this)\">{eth(v)}</td>")
+                    f"onclick=\"explain(this)\">{amount(v, u)}</td>")
         rows.append(f"<tr><td>{esc(name)}</td>"
                     + cell(r.get("A"), "沒有攻擊時，受害者照自己的步驟存錢再領錢，最後領回")
                     + cell(r.get("B"), "有攻擊時，同一個受害者照同樣的步驟，最後只領回")
                     + cell(r.get("G"), "攻擊者在這個情境裡多拿到")
-                    + f"<td>{tag}</td></tr>")
+                    + ((cell(r.get("TA"), "沒有攻擊時，合約公庫最後剩下")
+                        + cell(r.get("TB"), "有攻擊時，合約公庫最後剩下")) if treasury else "")
+                    + f"<td>{harm_tag(r)}</td></tr>")
     return (f"<h3>4 種情境 <span class='note'>（點一下數字看它代表什麼）</span></h3>"
             f"<div class='tbl'><table class='envt'><tr><th>情境</th><th>沒攻擊時領回</th>"
-            f"<th>有攻擊時領回</th><th>攻擊者多拿</th><th></th></tr>{''.join(rows)}</table></div>"
+            f"<th>有攻擊時領回</th><th>攻擊者多拿</th>"
+            + ("<th>公庫餘額（沒攻擊）</th><th>公庫餘額（有攻擊）</th>" if treasury else "")
+            + f"<th></th></tr>{''.join(rows)}</table></div>"
             f"<p class='note' id='envexplain'>每個情境都從乾淨狀態開始，各跑一次「沒有攻擊」和「有攻擊」，"
-            f"只差在攻擊有沒有發生。數字是{term('合成層')}量的。</p>")
+            f"只差在攻擊有沒有發生。數字是{term('合成層')}量的。"
+            "受害者少拿回的錢要在攻擊者手上（攻擊者多拿的 ≥ 受害者少拿的），才算受損。</p>")
 
 
 # -- patch --------------------------------------------------------------------------------
@@ -413,9 +602,20 @@ var since=0, state={visited:{}, stage:null, idx:0, log:[], turns:{}, repair:null
  attempt:null, staticTxt:null}, job=null, started=null, redirectAt=null, stay=/[?&]stay=1/.test(location.search);
 var STEPS=__STEPS__;
 var CHECKS=__CHECKS__;
+var WORDS=__WORDS__;
 var LABELS=__LABELS__;
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function fmt(sec){sec=Math.max(0,Math.round(sec));var m=Math.floor(sec/60),s=sec%60;return (m?m+' 分 ':'')+s+' 秒';}
+// reattack_done: status proven / not_proven / not_executed; novel (technique.py) says whether any
+// attempt was a different technique -- false is check 5's not_diverse, absent on older gates.
+function reattackText(e){
+ var n=e.turns!=null?e.turns+' 回合':'';
+ if(e.status==='proven'){return '成功（修補被打穿）';}
+ if(e.status==='not_diverse'||(e.status==='not_proven'&&e.novel===false)){
+  return WORDS.not_diverse+(n?'：'+n+'內的攻擊都沒有成功，但都是之前用過的手法':'');}
+ if(e.status==='not_proven'){return (e.novel===true?'換了手法，未成功':'未成功')+(n?'（'+n+'）':'');}
+ return '沒有完成（不算通過）';
+}
 function onEvent(e){
  if(e.kind==='stage'){state.stage=e;state.idx=e.index;state.visited[e.index]=1;}
  else if(e.kind==='attempt'){state.attempt=e;}
@@ -428,7 +628,7 @@ function onEvent(e){
  else if(e.kind==='check'){state.checks[e.name]=e.status;}
  else if(e.kind==='repair_result'){state.repairDone=e;}
  else if(e.kind==='reattack_start'){state.log.push({kind:'note',text:'⚔️ 第 '+e.round+' 回合：修補通過檢查，AI 換一種手法再攻擊修補後的合約'});}
- else if(e.kind==='reattack_done'){state.log.push({kind:'note',text:'⚔️ 第 '+e.round+' 回合的再攻擊：'+({'proven':'成功（修補被打穿，AI 會再修一次）','not_proven':'未成功（'+e.turns+' 回合）','not_executed':'沒有完成（不算通過）'}[e.status]||e.status)});}
+ else if(e.kind==='reattack_done'){state.log.push({kind:'note',text:'⚔️ 第 '+e.round+' 回合，換手法再攻擊：'+reattackText(e)});}
  else if(e.kind==='ladder'){state.ladder[e.rung]=e;}
  else if(e.kind==='abg'){state.abg=e;}
  else if(e.kind==='row'){state.row=e;}
@@ -469,7 +669,7 @@ function render(d){
  if(state.abg){extra+='<p>📏 量損失：'+(state.abg.status==='pass'?'完成，4 種情境都量到了':'沒有重現')+'</p>';}
  if(state.repair){
   var src=state.repair.source==='recorded'?'重新驗證錄製的修補（不呼叫 AI）':(state.repair.source==='recorded_model'?'錄製時 AI 寫的修補':'AI 寫的修補');
-  var lights='';CHECKS.forEach(function(c){var s=state.checks[c[0]]||(state.repairDone?'skipped':'');var w={'pass':'通過','fail':'沒通過','skipped':'沒有跑（不算通過）','not_applicable':'不適用（單一檔案）','off':'這次沒有開'}[s]||'檢查中…';
+  var lights='';CHECKS.forEach(function(c){var s=state.checks[c[0]]||(state.repairDone?'skipped':'');var w=WORDS[s]||'檢查中…';
    lights+='<div class="light"><span class="lamp '+(s||'wait')+'"></span><b>'+esc(c[1])+' '+w+'</b><span class="what note">'+esc(c[2])+'</span></div>';});
   extra+='<div class="card"><b>🔧 修補：第 '+state.repair.round+' 輪</b>　<span class="note">'+esc(src)+'</span><div class="lights">'+lights+'</div>'+
    (state.repairDone?('<b>'+(state.repairDone.accepted?'修補通過修補閘門的檢查（針對此攻擊）':'這一輪的修補沒有通過')+'</b>'):'')+'</div>';
@@ -493,6 +693,7 @@ function poll(){fetch('/api/job/'+JID+'?since='+since).then(function(r){return r
 poll();setInterval(function(){if(job)render({job:job,position:0,history:null});},1000);
 """.replace("__STEPS__", json.dumps(STEPS, ensure_ascii=False)).replace(
     "__CHECKS__", json.dumps(CHECKS, ensure_ascii=False)).replace(
+    "__WORDS__", json.dumps(CHECK_WORDS, ensure_ascii=False)).replace(
     "__LABELS__", json.dumps(LABELS, ensure_ascii=False))
 
 
@@ -583,7 +784,7 @@ def render_index(message: str, featured: list[dict[str, Any]], others: list[dict
 {msg}
 <div class="cards">
  <div class="card"><h2>① 上傳一份合約</h2><p>選一個 <code>.sol</code> 檔，或把 Foundry 專案壓成 <code>.zip</code>（上限 20 MB），AI 會試著攻擊它，系統負責判定。
-  找到攻擊時，AI 會寫修補，修補通過檢查後再換一種手法攻擊一次。約 2～8 分鐘（10/30 實測 6 次：154～398 秒，找到攻擊的 4 次含修補與再攻擊）。</p>
+  找到攻擊時，AI 會寫修補，修補通過檢查後再換一種手法攻擊一次。約 2～8 分鐘（arbiter-gpt，10/30 實測 6 次：154～398 秒，找到攻擊的 4 次含修補與再攻擊）；攻擊只以寬鬆條件證實時，系統會再要求 AI 用嚴格條件證明一次（最多再 16 回合），時間會更長。</p>
   <form method="post" action="/upload" enctype="multipart/form-data"><input type="file" name="contract" accept=".sol,.zip" required>
   <button class="btn primary">開始稽核</button></form>
   <p class="note">{esc(hist)}。會呼叫 AI 模型；編譯和執行都在沙箱裡。</p>
@@ -602,6 +803,11 @@ def render_index(message: str, featured: list[dict[str, Any]], others: list[dict
   <p class="note">2026-10-30 在公開示範 repo 的實際紀錄（arbiter-gpt）。</p>
   <p><a class="btn" href="/chain">另外：參考攻擊的真鏈示範 →</a></p>
  </div>
+</div>
+<div class="card"><h2>{term('鏈上紀錄')}：ME Network {term('測試網')}</h2>
+ <p>稽核的判定和證據的{term('雜湊')}可以登記到 ME Network 測試網；已證實可攻擊的程式碼，鏈上合約不讓它經由登記處部署。
+ 任何人都能在驗證頁從鏈上讀回紀錄，拿下載的檔案重算雜湊來比對。</p>
+ <p><a class="btn primary" href="/verify">鏈上驗證（ME Network）→</a></p>
 </div>
 {f"<details><summary>其他紀錄（{len(others)} 筆，測試與排練用）</summary>{_runs_rows(others, False)}</details>" if others else ''}
 {dev_box(dev)}
@@ -713,8 +919,8 @@ def _after_table(after: list[dict[str, Any]] | None) -> str:
         return ""
     rows = "".join(
         f"<tr><td>{esc(ENV_NAMES[r['env']] if r['env'] < len(ENV_NAMES) else r['env'])}</td>"
-        f"<td class='num'>{eth(r.get('A'))}</td><td class='num'>{eth(r.get('B'))}</td>"
-        f"<td class='num'>{eth(r.get('G'))}</td></tr>" for r in after)
+        f"<td class='num'>{amount(r.get('A'), r.get('unit'))}</td><td class='num'>{amount(r.get('B'), r.get('unit'))}</td>"
+        f"<td class='num'>{amount(r.get('G'), r.get('unit'))}</td></tr>" for r in after)
     return ("<h3>修補後再量一次</h3><div class='tbl'><table><tr><th>情境</th><th>沒攻擊時領回</th>"
             f"<th>有攻擊時領回</th><th>攻擊者多拿</th></tr>{rows}</table></div>")
 
@@ -735,8 +941,9 @@ def _tl_cell(e: dict[str, Any], cfile: str) -> str:
         if f.get("attack_path"):
             body.append(f"<p class='note'>攻擊路徑（AI 原文）：{esc(f['attack_path'])}</p>")
         if e.get("abg"):
-            rows = "".join(f"<tr><td>{esc(r.get('env'))}</td><td>{eth(r.get('A'))}</td><td>{eth(r.get('B'))}</td>"
-                           f"<td>{eth(r.get('G'))}</td></tr>" for r in e["abg"])
+            rows = "".join(f"<tr><td>{esc(r.get('env'))}</td><td>{amount(r.get('A'), r.get('unit'))}</td>"
+                           f"<td>{amount(r.get('B'), r.get('unit'))}</td>"
+                           f"<td>{amount(r.get('G'), r.get('unit'))}</td></tr>" for r in e["abg"])
             body.append("<div class='tbl'><table><tr><th>情境</th><th>A 沒攻擊時取回</th><th>B 有攻擊時取回</th>"
                         f"<th>G 攻擊者獲利</th></tr>{rows}</table></div>")
         if e.get("source") == "reattack":
@@ -747,7 +954,7 @@ def _tl_cell(e: dict[str, Any], cfile: str) -> str:
                 body.append("<p class='note'>這次試過、但沒有成功的攻擊假設：</p><ul>"
                             + "".join(f"<li class='note'>{esc(h)}</li>" for h in e["tried"] if h) + "</ul>")
             if e.get("reason"):
-                body.append(f"<p class='note'>沒有完成的原因：{esc(e['reason'])}</p>")
+                body.append(note_html(e["reason"], "沒有完成的原因："))
             body.append(f"<p class='note'>用了 {esc(e.get('turns'))} 回合、{esc(e.get('requests'))} 個 AI 請求、"
                         f"{esc(e.get('elapsed_s'))} 秒。</p>")
     else:
@@ -765,18 +972,85 @@ def _tl_cell(e: dict[str, Any], cfile: str) -> str:
 def timeline_html(p: dict[str, Any], cfile: str) -> str:
     """Attack / defence rounds in order (check 5), each cell expandable."""
     tl = p.get("timeline") or []
-    if not tl:
+    ra = p.get("reattack") or {}
+    if not tl and not ra.get("attempts"):
         return ""
     cells = "<span class='arrow'>→</span>".join(_tl_cell(e, cfile) for e in tl)
-    ra = p.get("reattack") or {}
     lab = ra.get("label") or ""
     if ra.get("enabled") is False:
         lab = "這次沒有開「換手法再攻擊」（檢查 5）"
+    elif not lab and ra.get("status") == "not_diverse":
+        lab = f"修補後再攻擊：{CHECK_WORDS['not_diverse']}"
     tail = (f"<p><b>{esc(lab)}</b></p>" if lab else "")
     cost = (f"<p class='note'>再攻擊一共 {esc(ra.get('attacks'))} 次、{esc(ra.get('requests'))} 個 AI 請求、"
             f"{esc(ra.get('elapsed_s'))} 秒。「未成功」只代表這一次換手法沒有找到能成功的攻擊，"
-            "不代表合約安全，也不代表修好了所有漏洞。</p>" if ra.get("attacks") else "")
-    return f"<div class='card'><h3>攻防過程</h3><div class='tl'>{cells}</div>{tail}{cost}</div>"
+            "不等於安全，也不代表修好了所有漏洞。</p>" if ra.get("attacks") else "")
+    cells = f"<div class='tl'>{cells}</div>" if cells else ""
+    return f"<div class='card'><h3>攻防過程</h3>{cells}{tail}{attempts_html(ra)}{cost}</div>"
+
+
+NOVELTY = {"same": ("warn", "同一手法"), "new_entry": ("ok", "換入口"),
+           "new_class": ("ok", "換手法"), "unknown": ("", "無法判斷")}
+
+
+def attempts_html(ra: dict[str, Any]) -> str:
+    """Check 5's re-attacks, each compared with the attacks before it (patch.reattack.attempts)."""
+    attempts = ra.get("attempts") or []
+    if not attempts:
+        return ""
+    items = []
+    for a in attempts:
+        cls, word = NOVELTY.get(str(a.get("novelty")), NOVELTY["unknown"])
+        res = "攻擊成功（修補被打穿）" if a.get("passed") else "攻擊沒有成功"
+        fp = a.get("fingerprint")
+        items.append(
+            f"<li><span class='tag {cls}'>{esc(word)}</span><b>{esc(res)}</b>"
+            + (f" <code>{esc(a.get('name'))}</code>" if a.get("name") else "")
+            + (f"<br><span class='note'>攻擊假設（AI 原文）：{esc(a.get('hypothesis'))}</span>" if a.get("hypothesis") else "")
+            + (f"<details><summary>技術細節：手法指紋</summary><pre>{esc(json.dumps(fp, ensure_ascii=False, indent=1))}</pre></details>"
+               if fp else "")
+            + "</li>")
+    novel = ra.get("novel")
+    verdict = ("" if novel is None else
+               "<p class='note'>系統比對攻擊程式的入口和手法：這次再攻擊和之前的攻擊不同。</p>" if novel else
+               f"<p><b>{esc(CHECK_WORDS['not_diverse'])}</b><span class='note'>：系統比對攻擊程式的入口和手法，"
+               "每次再攻擊都和之前用過的相同，所以「換手法再攻擊」這一項不算通過。</span></p>")
+    return (f"<h3>修補後的再攻擊：有沒有換手法</h3><ul class='attempts'>{''.join(items)}</ul>{verdict}"
+            "<p class='note'>「同一手法」＝和之前的攻擊入口、手法都相同；「換入口」＝同一類手法、從不同的函式進來；"
+            "「換手法」＝不同類的攻擊。</p>")
+
+
+STRICT_RETRY_WORDS = {"proven": ("ok", "成功"), "not_proven": ("warn", "沒有成功"),
+                      "skipped": ("", "沒有進行"), "error": ("", "沒有完成")}
+
+
+def strict_retry_html(sr: dict[str, Any] | None) -> str:
+    """findings[].strict_retry: after a proof under a loose predicate, the system asked the AI
+    to prove the same attack again under the strict one (victim_loss)."""
+    if not sr:
+        return ""
+    st = str(sr.get("status"))
+    cls, word = STRICT_RETRY_WORDS.get(st, ("", "狀態不明"))
+    turns = f"（{esc(sr.get('turns'))} 回合）" if sr.get("turns") is not None else ""
+    if st == "proven":
+        what = (f"<p>嚴格條件 <code>{esc(sr.get('predicate') or 'victim_loss')}</code> 也成立"
+                + (f"（攻擊程式 <code>{esc(sr.get('poc_name'))}</code>）" if sr.get("poc_name") else "")
+                + "：受害者少拿回錢，而且差額在攻擊者手上。</p>")
+    elif st == "not_proven":
+        what = ("<p class='note'>AI 沒有寫出符合嚴格條件（受害者少拿回錢，而且差額在攻擊者手上）的攻擊。"
+                "原本用寬鬆條件的證實仍然成立，只是沒有受害者少拿多少的數字。</p>")
+    else:
+        what = ""
+    cost = []
+    if sr.get("requests") is not None:
+        cost.append(f"{esc(sr.get('requests'))} 個 AI 請求")
+    if sr.get("elapsed_s") is not None:
+        cost.append(f"{esc(sr.get('elapsed_s'))} 秒")
+    return (f"<div class='card'><h3>寬鬆條件證實 → 系統要求 AI 改用嚴格條件再證明一次："
+            f"<span class='tag {cls}'>{esc(word)}{turns}</span></h3>{what}"
+            + (note_html(sr.get("reason"), "原因：") if st != "proven" else "")
+            + (f"<p class='note'>用了 {'、'.join(cost)}。</p>" if cost else "")
+            + "</div>")
 
 
 def finding_html(f: dict[str, Any], idx: int, rid: str, i: int, j: int, ex: dict[str, Any]) -> str:
@@ -785,15 +1059,23 @@ def finding_html(f: dict[str, Any], idx: int, rid: str, i: int, j: int, ex: dict
         parts.append(f"<div class='vcard v-hint'><div class='icon'>!</div><h2>證實的條件比較寬鬆</h2>"
                      f"<div class='mean'>{esc(f['predicate_note'])}。這類結果目前沒有損失數字、修補與回歸測試。</div>"
                      f"<div class='next'>建議：仍視為已證實可攻擊處理。</div></div>")
+    parts.append(strict_retry_html(f.get("strict_retry")))
     parts.append(story(f))
     abg = f.get("abg") or {}
-    if abg.get("status") in ("measured", "reproduction_failed"):
+    if abg.get("status") == "reproduction_failed":
+        parts.append("<div class='card'>"
+                     f"<h3>損失數字 <span class='tag warn'>{esc(abg.get('label') or '重現失敗')}</span></h3>"
+                     + note_html(abg.get("note"), "原因：")
+                     + "<p class='note'>稽核當時，系統已經執行過這個攻擊並判定成立；之後要在 4 種情境重跑、"
+                       "量受害者少拿多少時，這一步沒有成功。所以下表是「沒有量到」，不代表受害者沒有損失。</p>"
+                     + env_table(abg, idx) + "</div>")
+    elif abg.get("status") == "measured":
         funding = ex.get("funding")
         parts.append("<div class='card'>" + env_table(abg, idx)
                      + (f"<p class='note'>攻擊者多拿的錢可能來自合約裡其他人的資金（例如部署時存入的 {esc(funding)}）。</p>" if funding else "")
                      + "</div>")
     elif abg.get("label"):
-        parts.append(f"<p class='note'>損失數字：{esc(abg.get('label'))}{('：' + esc(abg.get('note'))) if abg.get('note') else ''}</p>")
+        parts.append(f"<div class='note'>損失數字：{esc(abg.get('label'))}</div>" + note_html(abg.get("note")))
     p = f.get("patch") or {}
     cfile = ex.get("cfile") or "Target.sol"
     parts.append(f"<h2>{term('修補', '修補')}建議 <span class='tag {'ok' if p.get('status') == 'verified' else 'warn'}'>{esc(p.get('label'))}</span></h2>")
@@ -826,7 +1108,7 @@ def finding_html(f: dict[str, Any], idx: int, rid: str, i: int, j: int, ex: dict
             f"<p class='note'>修補閘門代號：<code>{esc(' '.join(f'{k}:{v}' for k, v in gates.items()))}</code></p></details>"
             "</div>")
     elif p.get("note"):
-        parts.append(f"<p class='note'>{esc(p['note'])}</p>")
+        parts.append(note_html(p["note"]))
     else:
         parts.append("<p class='note'>這次沒有產生修補。</p>")
     ev = f.get("evidence")
@@ -848,19 +1130,288 @@ def sandbox_text(sb: dict[str, Any] | None) -> str:
     return "沒有記錄（這份結果早於沙箱功能）"
 
 
+# -- ME Network on-chain record (sidecar runs/gate/web/<rid>.me.json, schema arbiter-me/0.1) --
+#
+# The card draws the record chain as a timeline: the gate result's record, what AuditRegistry
+# did with its deployment and, when me-tools registered the patched contract as a child record
+# (sidecar "patched"), the patch, the child record and its deployment through the registry.
+#
+# Explorer links: the ME explorer is a single-page app keyed by Cosmos transaction hashes
+# (BRIEF section 6). A link is shown only in one of its own routes -- the URLs the sidecar
+# carries in "explorer", or one built from a "cosmosTx" hash or a block number -- never
+# /tx/0x... or /address/0x..., which it does not serve. Every 0x hash is printed as well, with
+# the `cast receipt` command that asks the node directly when the explorer is down.
+
+ME_VERDICTS = {3: LABELS[PROVEN], 2: LABELS[STATIC_HINT], 1: LABELS[NO_PROVABLE], 0: LABELS[NOT_EXECUTED]}
+# In the timeline the next step says what happened to the deployment: no "（擋部署）" here.
+ME_STEP_VERDICTS = {**ME_VERDICTS, 3: "已證實可攻擊"}
+ME_STEP_CLASS = {3: "bad", 2: "warn", 1: "info", 0: "warn"}
+ESCROW_WORDS = {"paid": "已付給稽核者（稽核有完成）", "refunded": "已退回付款人（稽核沒有完成）",
+                "open": "還沒結算"}
+ME_EXPLORER = {400: "https://www.explorer-testnet.me"}
+ME_RPC = {400: "https://beta-hub-8545.explorer-testnet.me"}
+_EXPLORER_URL = re.compile("(?:" + "|".join(map(re.escape, ME_EXPLORER.values())) + r")/[A-Za-z-]+/"
+                           r"(?:transactions/[0-9A-Fa-f]{64}\?netType=hub|accountDetails/me1[02-9ac-hj-np-z]{38}"
+                           r"|blocks/[0-9]+\?netType=hub)")
+_COSMOS_HASH = re.compile(r"[0-9A-Fa-f]{64}")
+_TX_HASH = re.compile(r"0x[0-9a-fA-F]{64}")
+_ADDR = re.compile(r"0x[0-9a-fA-F]{40}")
+_HEX = re.compile(r"0x[0-9a-fA-F]+")
+_HTTPS = re.compile(r"https://[^\s'\"<>]+")
+_LOCAL_PATH = re.compile(r"(?:^|[\s'\"(])(?:[A-Za-z]:[\\/]|/(?:home|mnt|root|Users|tmp|private|var)/|file:)", re.I)
+
+
+def _ext(url: Any, text: str) -> str:
+    """An external link (evidence location), only for a plain https URL; otherwise the text alone."""
+    if isinstance(url, str) and _HTTPS.fullmatch(url):
+        return f"<a href='{esc(url)}' target='_blank' rel='noopener'>{text}&nbsp;↗</a>"
+    return text
+
+
+def _xlink(url: Any, text: str) -> str:
+    """A link into the ME explorer, only in a route it serves; otherwise the text alone."""
+    if isinstance(url, str) and _EXPLORER_URL.fullmatch(url):
+        return f"<a href='{esc(url)}' target='_blank' rel='noopener'>{text}&nbsp;↗</a>"
+    return text
+
+
+def _tx_url(me: dict[str, Any], given: Any, cosmos: Any) -> str | None:
+    """A transaction's explorer page: the sidecar's URL, else one built from its Cosmos hash."""
+    if isinstance(given, str) and _EXPLORER_URL.fullmatch(given):
+        return given
+    base = ME_EXPLORER.get(me.get("chainId"))
+    if base and isinstance(cosmos, str) and _COSMOS_HASH.fullmatch(cosmos):
+        return f"{base}/zh-TW/transactions/{cosmos}?netType=hub"
+    return None
+
+
+def _cosmos_hash(cosmos: Any, url: Any) -> str | None:
+    """A transaction's Cosmos hash: the sidecar's field, else the one in its explorer URL."""
+    if isinstance(cosmos, str) and _COSMOS_HASH.fullmatch(cosmos):
+        return cosmos
+    if isinstance(url, str) and _EXPLORER_URL.fullmatch(url) and (m := re.search(r"/transactions/(\w{64})\?", url)):
+        return m.group(1)
+    return None
+
+
+def _block_url(me: dict[str, Any], block: Any) -> str | None:
+    base = ME_EXPLORER.get(me.get("chainId"))
+    if base and isinstance(block, int) and not isinstance(block, bool) and block >= 0:
+        return f"{base}/zh-TW/blocks/{block}?netType=hub"
+    return None
+
+
+def _record_id(v: Any) -> int | None:
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 1 else None
+
+
+def _verify_href(me: dict[str, Any], key: str, value: Any) -> str | None:
+    """The verify page for a record id or a deployed address on the sidecar's network: ME
+    testnet is the page's default; an anvil rehearsal also names the network and contracts."""
+    if key == "record" and _record_id(value) is None:
+        return None
+    if key == "address" and not (isinstance(value, str) and _ADDR.fullmatch(value)):
+        return None
+    q = [(key, str(value))]
+    if me.get("chainId") == 31337:
+        q.append(("net", "anvil"))
+        q += [(k, me[k]) for k in ("registry", "escrow") if isinstance(me.get(k), str) and _ADDR.fullmatch(me[k])]
+    elif not (me.get("chainId") == 400 or me.get("network") == "me-testnet"):
+        return None
+    return "/verify?" + urllib.parse.urlencode(q)
+
+
+def _hash(h: Any, short: bool = False) -> str:
+    s = str(h or "")
+    if not _HEX.fullmatch(s):
+        return "—"
+    if int(s, 16) == 0:
+        return "沒有"
+    if short and len(s) > 20:
+        return f"<span class='hash short' title='{esc(s)}'>{esc(s[:10])}…{esc(s[-6:])}</span>"
+    return f"<span class='hash' title='{esc(s)}'>{esc(s)}</span>"
+
+
+def _me_network(me: dict[str, Any]) -> str:
+    if me.get("chainId") == 400 or me.get("network") == "me-testnet":
+        return f"ME Network {term('測試網')}（chainId 400）"
+    if me.get("chainId") == 31337:
+        return "本機測試鏈 anvil（chainId 31337，不是公開網路）"
+    return f"{esc(me.get('network'))}（chainId {esc(me.get('chainId'))}）"
+
+
+Step = tuple[str, str, list[str]]  # (class, title html, lines of html)
+
+
+def _record_step(me: dict[str, Any], rec: dict[str, Any], links: dict[str, Any]) -> Step:
+    v = rec.get("verdict")
+    words = ME_STEP_VERDICTS.get(v) or str(rec.get("verdictLabel") or v)
+    lines = []
+    if _record_id(rec.get("parentId")):
+        lines.append(f"上一筆紀錄 #{rec['parentId']}（修補前）")
+    if rec.get("tx"):
+        block = rec.get("block")
+        lines.append(f"登記交易 {_xlink(_tx_url(me, links.get('record_tx'), rec.get('cosmosTx')), _hash(rec['tx'], True))}"
+                     + (f"（區塊 {_xlink(_block_url(me, block), esc(block))}）" if block is not None else ""))
+    return ME_STEP_CLASS.get(v, ""), f"紀錄 #{esc(rec.get('id'))}：{esc(words)}", lines
+
+
+def _deploy_step(me: dict[str, Any], rec: dict[str, Any], dep: dict[str, Any], links: dict[str, Any]) -> Step:
+    st = dep.get("status")
+    tx = _xlink(_tx_url(me, links.get("deploy_tx"), dep.get("cosmosTx")), _hash(dep.get("tx"), True))
+    if st == "blocked":
+        why = ("稽核沒有完成，AuditRegistry 不讓這份程式碼經由它部署" if rec.get("verdict") == 0 else
+               "AuditRegistry 不讓已證實可攻擊的程式碼經由它部署")
+        lines = [esc(plain_note(dep.get("reason")) or why)]
+        if dep.get("tx"):
+            lines.append(f"拒絕交易 {tx}（交易失敗是預期的）")
+        return "bad", "鏈上合約拒絕部署", lines
+    if st == "deployed":
+        at = _xlink(links.get("address"), _hash(dep.get("address"), True))
+        lines = [f"部署交易 {tx}"] if dep.get("tx") else []
+        if dep.get("linkKind") == 2:
+            return "ok", f"由 AuditRegistry 部署到 {at}", [
+                f"部署的就是紀錄 #{esc(rec.get('id'))} 稽核過的 bytecode（{term('CREATE2')}）"] + lines
+        return "warn", f"稽核者自行宣告的部署：{at}", [
+            "鏈上合約只記下這個位址和它的程式碼雜湊，不保證程式碼來自稽核過的原始碼"] + lines
+    if st == "failed":
+        return "warn", "部署沒有完成", [esc(plain_note(dep.get("reason")) or "原因沒有記錄")]
+    return "", "這次沒有要求部署", []
+
+
+def _chain_html(steps: list[Step]) -> str:
+    items = "".join(f"<li class='{cls}'><b>{title}</b>" + "".join(f"<div class='sub'>{x}</div>" for x in lines if x)
+                    + "</li>" for cls, title, lines in steps)
+    return f"<ol class='mechain'>{items}</ol>"
+
+
+def _escrow_line(me: dict[str, Any], q: dict[str, Any]) -> str:
+    st = str(q.get("status"))
+    fee = amount(q.get("fee_wei"), {"token": "MEC", "decimals": 18})
+    parts = [f"{esc(fee)}，{ESCROW_WORDS.get(st) or esc(st)}" + ("，費用不隨判定改變" if st == "paid" else "")]
+    if rid := _record_id(q.get("recordId")):
+        parts.append(f"由紀錄 #{rid} 結算")
+    if q.get("settleTx"):
+        parts.append("結算交易 " + _xlink(_tx_url(me, None, q.get("cosmosTx")), _hash(q.get("settleTx"), True)))
+    if q.get("recipient"):
+        parts.append("收款帳戶 " + _hash(q.get("recipient"), True))
+    head = f"委託 #{esc(q['id'])}：" if q.get("id") is not None else ""
+    return head + "　·　".join(parts)
+
+
+def _record_tech(title: str, rec: dict[str, Any], dep: dict[str, Any], ev: dict[str, Any]) -> str:
+    hashes = [("原始碼（sourceHash）", rec.get("sourceHash")), ("gate.json（gateJsonHash）", rec.get("gateJsonHash")),
+              ("攻擊程式（exploitHash）", rec.get("exploitHash")), ("修補（patchHash）", rec.get("patchHash")),
+              ("編譯出的 initcode（initcodeHash）", rec.get("initcodeHash")),
+              ("部署的程式碼（runtimeCodeHash）", dep.get("runtimeCodeHash")),
+              ("產生結果的程式版本（toolCommit）", rec.get("toolCommit")),
+              ("證據清單（manifest sha256）", ev.get("manifest"))]
+    files = "".join(f"<li><code>{esc(x.get('name'))}</code> sha256 {_hash(x.get('sha256'))}</li>"
+                    for x in ev.get("files") or [] if isinstance(x, dict))
+    uri = str(ev.get("uri") or "")
+    uri_html = ("" if not uri else
+                "<p class='note'>證據位置：本機檔案（不顯示路徑）</p>" if _LOCAL_PATH.search(uri) else
+                f"<p class='note'>證據位置：{_ext(uri, esc(uri))}</p>" if _HTTPS.fullmatch(uri) else
+                f"<p class='note'>證據資料夾：<code>{esc(uri)}</code>（和結果一起保存）</p>")
+    return (f"<h3>{title}</h3><dl>" + "".join(f"<dt>{k}</dt><dd>{_hash(v)}</dd>" for k, v in hashes if v) + "</dl>"
+            + (f"<ul>{files}</ul>" if files else "") + uri_html)
+
+
+def _tx_tech(me: dict[str, Any], txs: list[tuple[str, Any, Any, Any]]) -> str:
+    """Every transaction with its 0x hash, Cosmos hash and block, and the node-side check."""
+    rows, hashes = [], []
+    for what, tx, cosmos, block in txs:
+        if not (isinstance(tx, str) and _TX_HASH.fullmatch(tx)):
+            continue
+        hashes.append(tx)
+        rows.append(f"<li>{what}：{_hash(tx)}"
+                    + (f"；Cosmos 交易 <span class='hash'>{esc(cosmos)}</span>"
+                       if isinstance(cosmos, str) and _COSMOS_HASH.fullmatch(cosmos) else "")
+                    + (f"；區塊 {esc(block)}" if block is not None else "") + "</li>")
+    if not rows:
+        return ""
+    rpc = ME_RPC.get(me.get("chainId"))
+    cmds = ("<p class='note'>瀏覽器打不開時，直接向節點查（需要 Foundry 的 cast）：</p><pre>"
+            + "\n".join(f"cast receipt {h} --rpc-url {rpc}" for h in hashes) + "</pre>") if rpc else ""
+    return f"<h3>交易</h3><ul>{''.join(rows)}</ul>{cmds}"
+
+
+def me_card(me: dict[str, Any] | None) -> str:
+    """The result's on-chain record chain: what was registered, where, and what happened to each
+    deployment. Addresses and hashes only; never a key or a local path."""
+    if not isinstance(me, dict) or not isinstance(me.get("record"), dict):
+        return ""
+    rec, dep = me["record"], me.get("deploy") or {}
+    links = me.get("explorer") or {}
+    pat = me.get("patched") if isinstance(me.get("patched"), dict) else {}
+    prec = pat.get("record") if isinstance(pat.get("record"), dict) else None
+    pdep, plinks = pat.get("deploy") or {}, pat.get("explorer") or {}
+    rid, prid = rec.get("id"), (prec or {}).get("id")
+
+    steps = [_record_step(me, rec, links), _deploy_step(me, rec, dep, links)]
+    if prec:
+        steps += [("info", "修補", ["套用通過驗證的修補（針對此攻擊）",
+                                    f"patchHash {_hash(prec.get('patchHash'), True)}"]),
+                  _record_step(me, prec, plinks), _deploy_step(me, prec, pdep, plinks)]
+
+    rows = [("網路", _me_network(me)),
+            ("稽核者帳戶", _hash(rec.get("auditor"), True)),
+            ("模型", f"<code>{esc(rec.get('model') or '未記錄')}</code>")]
+    esc_req = me.get("escrow_request")
+    if isinstance(esc_req, dict):
+        rows.append((term("托管", "托管") + "的稽核費", _escrow_line(me, esc_req)))
+    if me.get("recordedAt"):
+        rows.append(("登記時間", esc(me.get("recordedAt"))
+                     + (f"（紀錄 #{esc(prid)}：{esc(pat.get('recordedAt'))}）" if prec and pat.get("recordedAt") else "")))
+    dl = "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in rows)
+
+    deployed = next((d.get("address") for d in (pdep, dep) if d.get("status") == "deployed"), None)
+    buttons = [(f"在驗證頁查看紀錄 #{rid}", _verify_href(me, "record", rid)),
+               (f"紀錄 #{prid}（修補後）", _verify_href(me, "record", prid) if prec else None),
+               ("部署的合約", _verify_href(me, "address", deployed))]
+    shown = [(w, h) for w, h in buttons if h]
+    verify = ("<p>" + " ".join(f"<a class='btn{' primary' if i == 0 else ''}' href='{esc(h)}'>{esc(w)}</a>"
+                               for i, (w, h) in enumerate(shown)) + "</p>") if shown else ""
+
+    esc_req = esc_req if isinstance(esc_req, dict) else {}
+    txs = [(f"登記紀錄 #{esc(rid)}", rec.get("tx"), _cosmos_hash(rec.get("cosmosTx"), links.get("record_tx")),
+            rec.get("block")),
+           ("部署被拒絕（交易失敗是預期的）" if dep.get("status") == "blocked" else "部署",
+            dep.get("tx"), _cosmos_hash(dep.get("cosmosTx"), links.get("deploy_tx")), None),
+           ("結算稽核費", esc_req.get("settleTx"), _cosmos_hash(esc_req.get("cosmosTx"), None), None)]
+    if prec:
+        txs += [(f"登記紀錄 #{esc(prid)}", prec.get("tx"), _cosmos_hash(prec.get("cosmosTx"), plinks.get("record_tx")),
+                 prec.get("block")),
+                ("部署修補後的合約", pdep.get("tx"), _cosmos_hash(pdep.get("cosmosTx"), plinks.get("deploy_tx")), None)]
+    contracts = (f"<dt>AuditRegistry</dt><dd>{_xlink(links.get('registry'), _hash(me.get('registry')))}</dd>"
+                 + (f"<dt>AuditEscrow</dt><dd>{_hash(me.get('escrow'))}</dd>" if me.get("escrow") else ""))
+    tech = (f"<details><summary>技術細節：登記的證據{term('雜湊', '雜湊')}和交易</summary>"
+            + _record_tech(f"紀錄 #{esc(rid)}", rec, dep, me.get("evidence") or {})
+            + (_record_tech(f"紀錄 #{esc(prid)}（修補後）", prec, pdep, pat.get("evidence") or {}) if prec else "")
+            + _tx_tech(me, txs) + f"<h3>鏈上合約</h3><dl>{contracts}</dl></details>")
+    return (f"<div class='card'><h2>{term('鏈上紀錄')}（ME Network）</h2>{_chain_html(steps)}<dl>{dl}</dl>{verify}"
+            "<p class='note'>鏈上紀錄只證明：這個帳戶在這個時間，登記了這個判定和這些證據的雜湊。"
+            "判定對不對，要在驗證頁重算雜湊、重跑證據來確認。</p>"
+            f"{tech}</div>")
+
+
 def render_result(saved: dict[str, Any], rid: str, extras: dict[tuple[int, int], dict[str, Any]],
-                  downloads: str, dev: list[tuple[str, str]]) -> bytes:
+                  downloads: str, dev: list[tuple[str, str]], me: dict[str, Any] | None = None) -> bytes:
     rep, meta = saved["report"], saved["meta"]
     inp = rep.get("input") or {}
     models = ", ".join(rep.get("models") or []) or "未知"
     if inp.get("mode") == "from_results":
-        banner = (f"<div class='banner rec'><span class='dot'></span>錄製結果：{esc(inp.get('run_id'))}（模型 {esc(models)}）。"
+        day = meta.get("recorded_on")
+        banner = (f"<div class='banner rec'><span class='dot'></span>錄製結果：{esc(inp.get('run_id'))}"
+                  f"（{f'{esc(day)} 的實際紀錄，' if day else ''}模型 {esc(models)}）。"
                   "損失數字、修補檢查和證據等級是剛剛用 forge 重跑的</div>")
     else:
         banner = (f"<div class='banner live'><span class='dot'></span>即時稽核結果（{esc(meta.get('at'))}，模型 {esc(models)}）</div>")
     blocks = []
     for i, e in enumerate(rep.get("files") or []):
         blocks.append(verdict_card(e))
+        if i == 0:
+            blocks.append(me_card(me))
         if e.get("fixture_note"):
             blocks.append(f"<p class='note'><span class='tag warn'>測試用合成資料</span> {esc(e['fixture_note'])}</p>")
         blocks.append(f"<p class='note'>{esc(e['id'])}　·　AI 用了 {esc(e.get('turns'))} 回合</p>")
@@ -885,6 +1436,14 @@ def render_result(saved: dict[str, Any], rid: str, extras: dict[tuple[int, int],
 {''.join(blocks)}{downloads}{tech}{dev_box(dev)}{render_glossary()}
 <p class="note">「已證實可攻擊」附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。</p>"""
     return page("ARBITER Gate 結果", body, EXPLAIN_SCRIPT)
+
+
+def render_missing(what: str, why: str) -> bytes:
+    """A friendly 404 for a file the page serves but this machine does not have yet."""
+    body = (f"<p><a class='btn small' href='/'>← 回首頁</a></p><h1>找不到{esc(what)}</h1>"
+            f"<div class='card'><p>{esc(why)}</p><p class='note'>稽核本身不受影響；"
+            "結果頁和下載區照常可以使用。</p></div>")
+    return page("找不到", body)
 
 
 def render_chainreplay(saved: dict[str, Any], rid: str, f: dict[str, Any]) -> bytes:

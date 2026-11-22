@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdnjs.cloudflare.com 'sha256-2XY+wFeaOY21v2i2xUHat6K0ksP7XBGjKfSW/QH1oKw='; style-src 'self'; img-src 'self' data:; connect-src https: http:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark light">
+<title>ARBITER Gate 紀錄驗證</title>
+<meta name="description" content="查證 ARBITER Gate 寫在 ME 鏈上的稽核紀錄：判定、證據雜湊、部署與來龍去脈。直接讀鏈，免安裝、免錢包。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%238B7BFF'/%3E%3Cpath d='M9 9v8a7 7 0 0 0 14 0V9' fill='none' stroke='%23fff' stroke-width='3'/%3E%3C/svg%3E">
+<script>(function(){var p=location.pathname;if(!/\/$/.test(p)&&!/\.[A-Za-z0-9]+$/.test(p))location.replace(p+"/"+location.search+location.hash);})();</script>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.5/ethers.umd.min.js" integrity="sha512-dj/EbePKIJrkhHMePgJ6ACP0v5whCZi+A8ot7WP+L0a3sPafqqWRiRhBBlGprs5hs5JjOYuTDlOic+qKc/s3mw==" crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
+<script src="verify-lib.js" defer></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">跳到主要內容</a>
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="./"><span class="mark" aria-hidden="true"></span><span><b>ARBITER Gate</b><small>鏈上稽核紀錄驗證</small></span></a>
+    <div class="top-r">
+      <span id="net-pill" class="pill" role="status" aria-live="polite">準備中…</span>
+      <button id="theme-btn" class="icon-btn" type="button" aria-label="切換深色或淺色">◐</button>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <section class="hero">
+    <p class="eyebrow" id="hero-net">ME Network · AuditRegistry</p>
+    <h1>這份合約稽核過嗎？結論是什麼？證據對得上嗎？</h1>
+    <p class="lead">ARBITER Gate 要求 AI 寫出真的能跑的攻擊程式，再用 AI 看不到的條件判定。每次稽核的判定和證據指紋都寫進 ME 鏈上的 AuditRegistry。這個頁面直接向鏈讀取，不經過我們的伺服器，不用安裝、不用錢包。</p>
+  </section>
+
+  <section class="card" aria-labelledby="lookup-h">
+    <h2 id="lookup-h">查詢紀錄</h2>
+    <form id="lookup-form" novalidate>
+      <label for="q">合約地址、紀錄編號或交易雜湊</label>
+      <div class="row">
+        <input id="q" name="q" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="0x… 或 me1… 地址、紀錄編號、交易雜湊" aria-describedby="q-hint q-err">
+        <button class="btn primary" type="submit">查詢</button>
+      </div>
+      <p class="hint" id="q-hint">合約地址會找出部署它的紀錄（或自行宣告它的紀錄）；交易雜湊會讀出那筆交易登錄或部署了什麼；64 位的雜湊也可以是原始碼的 sha256。</p>
+      <p class="warnline" id="q-err" role="alert"></p>
+    </form>
+    <div id="sol-drop"></div>
+    <p class="warnline" id="lib-warn"></p>
+    <p class="warnline" id="param-warn" role="status"></p>
+  </section>
+
+  <div id="result" aria-live="polite"></div>
+
+  <section class="card" aria-labelledby="net-h">
+    <details id="net-details">
+      <summary><h2 id="net-h">網路與合約</h2><span id="net-summary" class="mute small"></span></summary>
+      <dl id="net-info"></dl>
+      <form id="net-form" class="netform">
+        <div>
+          <label for="net">網路</label>
+          <select id="net">
+            <option value="me-testnet">ME 測試網（chainId 400）</option>
+            <option value="anvil">本機 anvil（127.0.0.1:8545）</option>
+            <option value="custom">自訂 RPC</option>
+          </select>
+        </div>
+        <div>
+          <label for="rpc">RPC 網址</label>
+          <input id="rpc" type="url" autocomplete="off" spellcheck="false" placeholder="https://…">
+        </div>
+        <div>
+          <label for="registry">AuditRegistry 地址（選填）</label>
+          <input id="registry" type="text" autocomplete="off" spellcheck="false" placeholder="預設讀部署紀錄檔">
+        </div>
+        <div>
+          <label for="escrow">AuditEscrow 地址（選填）</label>
+          <input id="escrow" type="text" autocomplete="off" spellcheck="false" placeholder="預設讀部署紀錄檔">
+        </div>
+        <div class="full"><button class="btn" type="submit">套用</button></div>
+      </form>
+    </details>
+  </section>
+
+  <section class="card explain" aria-labelledby="ex-h">
+    <h2 id="ex-h">這個頁面檢查什麼，又不代表什麼</h2>
+    <ul>
+      <li><b>紀錄是稽核者的聲明。</b>鏈上紀錄證明「這個地址、在這個時間、登錄了這個判定和這些檔案指紋」，寫進去之後不能修改或刪除。它不證明判定是對的。</li>
+      <li><b>雜湊相符，代表檔案沒被換過。</b>你拿到的檔案和當初登錄的是同一份，一個位元都沒改；不代表檔案內容正確。</li>
+      <li><b>追問的方法是重跑證據。</b>拿證據包裡的攻擊程式自己執行（例如 <span class="mono">forge test</span>），結果應該和 gate.json 一致；跑不出來，就是質疑這筆紀錄的根據。</li>
+      <li><b>「未發現可證明攻擊」不等於安全。</b>它只代表這次沒找到能證明的攻擊。只有「已證實可攻擊」附可重跑的攻擊證據。</li>
+      <li><b>部署連結分兩種。</b>「由 AuditRegistry 依稽核過的 bytecode 部署」代表部署的就是稽核過的建立程式碼，同一筆紀錄可以部署很多次；「稽核者自行宣告」未經閘門部署，只記下宣告當時的程式碼雜湊，任何稽核者都能宣告任何地址。頁面另外比對每個地址上現在的程式碼。</li>
+      <li><b>同一份程式碼的其他紀錄也要看。</b>同一份 bytecode 若另有「已證實可攻擊」的紀錄，頁面會標出來並寫明是誰登錄的；同一位稽核者自相矛盾時，AuditRegistry 不會經由閘門部署。</li>
+      <li><b>交易附 0x 雜湊與自我驗證指令。</b>ME 的區塊瀏覽器以 Cosmos 交易雜湊索引；頁面向 ME Hub 查出對應的 Cosmos 交易才給連結，查不到時給 <span class="mono">cast receipt</span> 指令，讓你直接向鏈讀取。</li>
+      <li><b>看清楚稽核者。</b>任何人都能登錄紀錄。標「✓」的稽核者是 repo 裡部署紀錄檔（me/deployments）列出的地址。</li>
+      <li><b>這個頁面只讀取。</b>不連錢包、不送交易；拖進來的檔案只在你的瀏覽器裡計算 sha256，不會上傳。</li>
+    </ul>
+  </section>
+</main>
+
+<footer class="wrap foot">
+  <p>ARBITER Gate：AI 必須寫出能跑的攻擊，系統用 AI 看不到的條件判定；證實的攻擊擋下部署，並附通過檢查的修補。· <a href="https://github.com/sam029031/arbiter-gate" target="_blank" rel="noopener noreferrer">原始碼</a></p>
+</footer>
+<p id="sr-status" class="sr-only" aria-live="polite"></p>
+<noscript><p class="wrap">這個頁面需要 JavaScript 才能讀取區塊鏈。</p></noscript>
+</body>
+</html>

@@ -55,9 +55,13 @@ fs_permissions = []
 # exploitable. Agents that need to act as a plain account use mode='eoa'.
 _CONTRACT_ATTACK = "        atk.attack();"
 
-# The pranked block an EOA-mode attack runs inside; its body is the attack.
+# The pranked block an EOA-mode attack runs inside; its body is the attack. Two spellings:
+# the profit templates prank a local `eoa`, the victim-loss template pranks the
+# contract-level `arbEoa`. Matching only the first left every EOA-mode victim_loss proof
+# un-neutered, so the negation check silently passed it without running.
 _EOA_PRANK_RE = re.compile(
-    r"vm\.startPrank\(eoa, eoa\);(.*?)vm\.stopPrank\(\);", re.DOTALL
+    r"vm\.startPrank\((?P<who>eoa|arbEoa), (?P=who)\);(?P<body>.*?)vm\.stopPrank\(\);",
+    re.DOTALL,
 )
 
 
@@ -491,6 +495,7 @@ class Workspace:
         token_expr: str = "",
         extra_imports: list[str] | None = None,
         funding_wei: int = 10**19,
+        treasury_exit: str = "",
     ) -> str:
         """A predicate the agent cannot satisfy by choosing a weak baseline.
 
@@ -518,14 +523,27 @@ class Workspace:
 
         Both trials run inside one test on a state snapshot, so setup happens once and
         the two worlds are identical up to the attack.
+
+        Two optional measurements widen WHO can be the victim without loosening the rule
+        (see _VICTIM_TRIAL_ASSETS). `token_expr` measures every party in that ERC20
+        rather than in ether; the victim is handed up to the environment's endowment of
+        the deployer's tokens. `treasury_exit` is the deployer's own legitimate claim
+        (e.g. `target.withdrawFees();`), run after the victim exits in both worlds, so a
+        drained fee pot is harm to the owner. With neither, the file is exactly the
+        ether-only one.
         """
         _eoa = draw_identity()
         _victim = draw_identity()
+        assets = bool(token_expr.strip() or treasury_exit.strip())
+        # Drawn only when used, so an ether-only composition consumes exactly the random
+        # draws it always did.
+        _stranger = draw_identity() if assets else ""
         deploy_code = strip_preamble(deploy_code)
         attacker_code = strip_preamble(attacker_code)
         attack_body = strip_preamble(attack_body)
         victim_enter = strip_preamble(victim_enter)
         victim_exit = strip_preamble(victim_exit)
+        treasury_exit = strip_preamble(treasury_exit)
         # The target is imported unnamed, so its top-level symbols are already in scope.
         # In repo mode this sees the contract under audit and not its import closure, so a
         # collision with a dependency's IERC20 still gets through -- partial, and better
@@ -536,12 +554,14 @@ class Workspace:
             "attack_body": attack_body,
             "victim_enter": victim_enter,
             "victim_exit": victim_exit,
+            **({"treasury_exit": treasury_exit} if treasury_exit.strip() else {}),
         })
         deploy_code = _frags["deploy_code"]
         attacker_code = _frags["attacker_code"]
         attack_body = _frags["attack_body"]
         victim_enter = _frags["victim_enter"]
         victim_exit = _frags["victim_exit"]
+        treasury_exit = _frags.get("treasury_exit", treasury_exit)
         if not victim_enter.strip() or not victim_exit.strip():
             raise ValueError(
                 "victim_loss needs victim_enter and victim_exit: what an ordinary user "
@@ -563,6 +583,33 @@ class Workspace:
         # either -- a "victim" who pranks the owner is not a victim.
         _reject_forgery(victim_enter, "victim_enter")
         _reject_forgery(victim_exit, "victim_exit")
+        # Setup and the victim's own steps may not name the harness's accounts: the
+        # identity draw only works if the fragments written before the attack cannot
+        # reach the attacker, and setup cannot reach the victim either.
+        _reject_harness_names(deploy_code, "deploy_code", _setup_names(mode))
+        _reject_harness_names(victim_enter, "victim_enter", _victim_step_names(mode))
+        _reject_harness_names(victim_exit, "victim_exit", _victim_step_names(mode))
+        if assets:
+            # The owner's claim is the owner's own call: it may not impersonate anyone.
+            _reject_halting(treasury_exit, "treasury_exit")
+            _reject_forgery(treasury_exit, "treasury_exit")
+            # The widened measurement is only as sound as the parties staying unknown to
+            # the code written before them. The harness's own identities are contract
+            # constants, so they are in scope for setup by name; refuse them here rather
+            # than rely on a guard elsewhere (core-strict closes the same hole for every
+            # mode). An owner's claim that pays the attacker or the victim is not a claim.
+            for field, text in (("deploy_code", deploy_code),
+                                ("treasury_exit", treasury_exit),
+                                ("token_expr", token_expr)):
+                hit = _VICTIM_HARNESS_NAMES_RE.search(_blank_noncode(text))
+                if hit:
+                    raise ValueError(
+                        f"{field} names the harness account {hit.group(0)!r}. Those "
+                        "accounts are drawn after you write this, so that nothing set up "
+                        "before the attack can favour or disadvantage them. Give the "
+                        "victim tokens through victim_enter (a public mint or purchase) "
+                        "or leave them with the deployer: the harness hands the victim "
+                        "up to the environment's endowment of the deployer's tokens.")
 
         if token_expr.strip():
             measure_victim = f"_ArbiterToken({token_expr.strip()}).balanceOf(arbVictim)"
@@ -603,7 +650,7 @@ class Workspace:
         if _victim_decls:
             _state_decls = _state_decls + "\n" + _victim_decls
         env = VICTIM_ENVIRONMENTS
-        return _VICTIM_TEMPLATE.format(
+        trial_keys = dict(
             n_env=len(env),
             endows=", ".join(
                 (f"uint256({e[0]})" if i == 0 else str(e[0]))
@@ -617,12 +664,59 @@ class Workspace:
                 (f"uint256({e[2]})" if i == 0 else str(e[2]))
                 for i, e in enumerate(env)
             ),
+            measure_victim=measure_victim,
+            measure_atk=measure_atk,
+        )
+        if not assets:
+            trial = _VICTIM_TRIAL.format(
+                **trial_keys,
+                fail_report=(_VICTIM_FAIL if self.custom_errors else _VICTIM_FAIL_REQUIRE),
+            )
+            error_decl = _VICTIM_ERROR if self.custom_errors else ""
+        else:
+            tok = token_expr.strip()
+            eth_atk = ("address(atk).balance + arbAtkEoa.balance"
+                       if mode == "contract" else "arbEoa.balance")
+
+            def held(who: str) -> str:
+                return f"_ArbiterToken({tok}).balanceOf({who})" if tok else f"{who}.balance"
+
+            treasury = bool(treasury_exit.strip())
+            measure_owner = held("address(this)")
+            no_harm = ("revert ArbiterTreasuryNoHarm(best.recA, best.recB, best.tA, best.tB, "
+                       "best.g, best.claimPublic);" if treasury else
+                       "revert ArbiterNoHarm(best.recA, best.recB, best.g);")
+            fail = (_VICTIM_ASSET_FAIL.format(no_harm=no_harm) if self.custom_errors else
+                    _VICTIM_ASSET_FAIL_REQUIRE.format(
+                        no_harm_name=("ArbiterTreasuryNoHarm" if treasury
+                                      else "ArbiterNoHarm")))
+            trial = _VICTIM_TRIAL_ASSETS.format(
+                **trial_keys,
+                stranger_addr=_stranger,
+                asset_expr=f"address({tok})" if tok else "address(0)",
+                asset_mutability="view" if tok else "pure",
+                treasury_fns=(_VICTIM_TREASURY_FNS.format(
+                    treasury_exit=_indent(treasury_exit, 8)) if treasury else ""),
+                token_endow=_VICTIM_TOKEN_ENDOW.format(token=tok) if tok else "",
+                owner_mid=(_VICTIM_OWNER_MID.format(measure_owner=measure_owner)
+                           if treasury else ""),
+                measure_target=held("address(target)"),
+                measure_atk_eth=eth_atk,
+                paid_check="netEth < 0" if tok else "false",
+                treasury_stage=(_VICTIM_TREASURY_STAGE.format(
+                    measure_owner=measure_owner, measure_stranger=held("arbStranger"))
+                    if treasury else ""),
+                fail_report=fail,
+            )
+            error_decl = (_VICTIM_ERROR + _VICTIM_ASSET_ERRORS) if self.custom_errors else ""
+        return _VICTIM_TEMPLATE.format(
+            trial_and_run=trial,
             victim_addr=_victim,
             eoa_addr=_eoa,
             pragma=self.pragma,
             target_import=self.target_import,
             extra_imports=("\n" + extras if extras else ""),
-            error_decl=(_VICTIM_ERROR if self.custom_errors else ""),
+            error_decl=error_decl,
             attacker_code=attacker_code.strip(),
             state_decls=_state_decls,
             # Only in contract mode, and it is worth saying why this line existed at
@@ -643,10 +737,6 @@ class Workspace:
             victim_exit=_indent(victim_exit, 8),
             setup=setup,
             attack_action=action,
-            measure_victim=measure_victim,
-            measure_atk=measure_atk,
-            funding_wei=int(funding_wei),
-            fail_report=(_VICTIM_FAIL if self.custom_errors else _VICTIM_FAIL_REQUIRE),
         )
 
     def compose_sweep(
@@ -941,7 +1031,7 @@ class Workspace:
                 )
             attempts.append({
                 "mode": mode, "solc": solc or "auto",
-                "error": _first_error(result.combined if result else ""),
+                "error": _first_error(result.combined if result else "", solc),
             })
 
         # Leave the workspace in the cheaper configuration: a failed project-wide build
@@ -950,10 +1040,14 @@ class Workspace:
         self.plan.chosen_src = "src"
         self.plan.chosen_solc = pinned
         self._write_toml("src", pinned)
+        # When no available compiler can build the contract inside the audit at all, that
+        # is the cause, and the last mode's "Found incompatible versions" only its echo.
+        from .solc_avail import explain_pragma
+
         return {
             "ok": False, "mode": "none", "rounds": rounds,
             "remappings": len(self.plan.remappings),
-            "error": attempts[-1]["error"] if attempts else "",
+            "error": explain_pragma(self.source) or (attempts[-1]["error"] if attempts else ""),
             "failed_modes": attempts,
         }
 
@@ -972,11 +1066,11 @@ class Workspace:
                 _CONTRACT_ATTACK.strip(), "/* attack removed by the harness */"
             ), True
         match = _EOA_PRANK_RE.search(solidity)
-        if match and match.group(1).strip():
+        if match and match.group("body").strip():
             return (
-                solidity[: match.start(1)]
+                solidity[: match.start("body")]
                 + "\n/* attack removed by the harness */\n"
-                + solidity[match.end(1):],
+                + solidity[match.end("body"):],
                 True,
             )
         return solidity, False
@@ -1648,7 +1742,14 @@ contract TestArbiterVictim is Harness {{
 {attack_action}
     }}
 
-    /// One world. `withAttack` is the only thing that differs between the two runs of
+{trial_and_run}
+}}
+"""
+
+# The ether-only trial and its judge, verbatim from before token_expr and treasury_exit
+# were measured: a composition that uses neither still produces the same file byte for
+# byte, so every proof, probe and published number from before stays comparable.
+_VICTIM_TRIAL = """    /// One world. `withAttack` is the only thing that differs between the two runs of
     /// a pair; the other three arguments are the environment, which is swept.
     function arbTrial(bool withAttack, uint256 endow, uint256 warpBy, uint256 rounds)
         external
@@ -1755,9 +1856,254 @@ contract TestArbiterVictim is Harness {{
         // the attacker is holding more than they started with.
 {fail_report}
         return ARB_COMPLETED;
+    }}"""
+
+
+# The same two worlds, measured per asset and per party. Used only when the exploit names
+# a token (token_expr) or a treasury claim (treasury_exit); the ether-only predicate above
+# is untouched.
+#
+# Why it exists. The ether-only predicate measures ONE party, a harness account, in ONE
+# asset, ether. Two whole classes were therefore unprovable however real they were: a fee
+# pot or protocol treasury emptied through a missing access check (the deployer's money is
+# scenery, so taking it reads as recA == recB), and theft of an ERC20 (the victim held no
+# tokens and nothing compared token flows with the contract under audit).
+#
+# Why it is still strict. Three additions, each closing a false positive the wider
+# measurement would otherwise open:
+#   * The treasury is the DEPLOYER's legitimate claim, measured in both worlds. It counts
+#     only if the clean world really pays it something (TA > TB needs TA > 0), so value
+#     forced in by setup that no claim covers stays scenery -- the 25-of-68 donation shape.
+#     And the same claim is replayed by a stranger first: a "claim" anybody can collect is
+#     a public pool, and the deployer losing a race for it is contention, not theft.
+#   * Conservation runs over every party: the attacker must hold at least what the victim
+#     AND the treasury lost together.
+#   * The attacker's gain must be accounted for by what left the contract under audit or
+#     the victim's own wallet during the attack (or the contract ended up holding more, the
+#     stale-oracle exception the profit predicates already carry). A token gain minted by a
+#     faucet, or drawn from a mock the setup built, is refused. In token units the
+#     attacker's ether is measured too, because 10 ether of funding turned into tokens is
+#     a purchase, not a theft, and the harness has no price to net the two against.
+_VICTIM_TRIAL_ASSETS = """    // ---- per-asset accounting ----
+    //
+    // Written by arbTrial for its caller to read after it returns, rather than returned:
+    // arbTrial keeps the three-value signature every report and regression contract
+    // already decodes.
+    uint256 internal arbTreasuryRec;
+    bool internal arbClaimPublic;
+    bool internal arbGainAccounted;
+    bool internal arbPaidEther;
+    address internal constant arbStranger = address(uint160({stranger_addr}));
+
+    /// The measured asset: address(0) for ether, else the token named by token_expr.
+    function arbAsset() external {asset_mutability} returns (address) {{ return {asset_expr}; }}
+{treasury_fns}
+    /// One world, as in the ether-only predicate, measured per party and per asset.
+    function arbTrial(bool withAttack, uint256 endow, uint256 warpBy, uint256 rounds)
+        external
+        returns (uint256 recovered, uint256 gain, bool attackRan)
+    {{
+        this.arbSetup();
+        if (warpBy > 0) {{ vm.warp(block.timestamp + warpBy); vm.roll(block.number + 1); }}
+        vm.deal(arbVictim, endow);
+{token_endow}
+        this.arbEnter();
+        uint256 mid = {measure_victim};
+{owner_mid}
+        attackRan = true;
+        arbGainAccounted = true;
+        arbPaidEther = false;
+        if (withAttack) {{ (gain, attackRan) = _arbAttackRounds(rounds); }}
+
+        (bool exited, ) = address(this).call(abi.encodeWithSignature("arbExit()"));
+        recovered = exited && {measure_victim} > mid ? {measure_victim} - mid : 0;
+{treasury_stage}
     }}
-}}
+
+    /// The rounds exactly as the ether-only predicate runs them (a fresh attacker and a
+    /// signed delta per round), plus where the gain came from.
+    function _arbAttackRounds(uint256 rounds) internal returns (uint256 gain, bool attackRan) {{
+        uint256 tgtPre = {measure_target};
+        uint256 vicPre = {measure_victim};
+        int256 net;
+        int256 netEth;
+        attackRan = true;
+        for (uint256 r = 0; r < rounds; r++) {{
+            this.arbDeploy();
+            int256 pre = int256({measure_atk});
+            int256 preEth = int256({measure_atk_eth});
+            (bool ok, ) =
+                address(this).call(abi.encodeWithSignature("arbAttack()"));
+            if (r == 0) {{ attackRan = ok; }}
+            if (!ok) {{ break; }}
+            net += int256({measure_atk}) - pre;
+            netEth += int256({measure_atk_eth}) - preEth;
+        }}
+        gain = net > 0 ? uint256(net) : 0;
+        uint256 tgtPost = {measure_target};
+        uint256 vicPost = {measure_victim};
+        uint256 outflow = (tgtPre > tgtPost ? tgtPre - tgtPost : 0)
+            + (vicPre > vicPost ? vicPre - vicPost : 0);
+        arbGainAccounted = gain == 0 || tgtPost > tgtPre || outflow >= gain;
+        arbPaidEther = {paid_check};
+    }}
+
+    struct ArbiterPair {{
+        bool ran;
+        uint256 recA;
+        uint256 recB;
+        uint256 tA;
+        uint256 tB;
+        uint256 g;
+        bool accounted;
+        bool paidEther;
+        bool claimPublic;
+    }}
+
+    /// One environment's matched pair; `ran` is false when it cannot speak.
+    function _arbPair(uint256 endow, uint256 warpBy, uint256 rounds)
+        internal
+        returns (ArbiterPair memory p)
+    {{
+        (bool okA, bytes memory ra) = address(this).call(abi.encodeWithSignature(
+            "arbTrial(bool,uint256,uint256,uint256)", false, endow, warpBy, rounds));
+        if (!okA) {{ return p; }}
+        (p.recA, , ) = abi.decode(ra, (uint256, uint256, bool));
+        p.tA = arbTreasuryRec;
+        p.claimPublic = arbClaimPublic;
+        if (p.recA == 0 && p.tA == 0) {{ return p; }}   // nobody has anything to lose
+
+        (bool okB, bytes memory rb) = address(this).call(abi.encodeWithSignature(
+            "arbTrial(bool,uint256,uint256,uint256)", true, endow, warpBy, rounds));
+        if (!okB) {{ return p; }}
+        (p.recB, p.g, p.ran) = abi.decode(rb, (uint256, uint256, bool));
+        p.tB = arbTreasuryRec;
+        p.accounted = arbGainAccounted;
+        p.paidEther = arbPaidEther;
+    }}
+
+    /// What the victim and the treasury lost together.
+    function _arbShortfall(ArbiterPair memory p) internal pure returns (uint256) {{
+        return (p.recA > p.recB ? p.recA - p.recB : 0) + (p.tA > p.tB ? p.tA - p.tB : 0);
+    }}
+
+    /// Harm to the parties together, conservation over all of them, and a gain the
+    /// contract under audit (or the victim's wallet) actually paid for.
+    function _arbProven(ArbiterPair memory p) internal pure returns (bool) {{
+        return p.recA + p.tA > p.recB + p.tB && p.g > 0 && p.g >= _arbShortfall(p)
+            && p.accounted && !p.paidEther;
+    }}
+
+    /// Same matched pairs and the same environments as the ether-only predicate.
+    function arbiterRun() external returns (bytes32) {{
+        uint256[{n_env}] memory endow = [{endows}];
+        uint256[{n_env}] memory warps = [{warps}];
+        uint256[{n_env}] memory rounds = [{rounds}];
+
+        ArbiterPair memory best;
+        bool anyRan;
+        for (uint256 i = 0; i < {n_env}; i++) {{
+            ArbiterPair memory p = _arbPair(endow[i], warps[i], rounds[i]);
+            if (!p.ran) {{ continue; }}
+            bool proven = _arbProven(p);
+            if (proven || !anyRan) {{ best = p; }}
+            anyRan = true;
+            if (proven) {{ break; }}                 // one environment is enough
+        }}
+
+        require(anyRan, "ARBITER: the attack reverted in every environment, or the "
+                        "victim's own path never worked -- fix victim_enter/victim_exit");
+        uint256 shortfall = _arbShortfall(best);
+{fail_report}
+        return ARB_COMPLETED;
+    }}"""
+
+# The treasury claim, twice: as the deployer (the owner's own legitimate call) and as a
+# stranger drawn per composition, so setup can neither name nor pre-arrange it.
+_VICTIM_TREASURY_FNS = """
+    /// treasury_exit, run as the deployer: what the owner legitimately claims.
+    function arbTreasuryExit() external {{
+{treasury_exit}
+    }}
+
+    /// The same claim made by a stranger. A claim a stranger can collect is a public
+    /// pool and is not the owner's to lose, so it is not counted.
+    function arbTreasuryStranger() external {{
+        vm.startPrank(arbStranger, arbStranger);
+{treasury_exit}
+        vm.stopPrank();
+    }}
+
+    function arbEndPrank() external {{ vm.stopPrank(); }}
+
+    /// The deployer is the test contract, so it has to be able to take ether.
+    receive() external payable {{}}
 """
+
+_VICTIM_OWNER_MID = "        uint256 ownerMid = {measure_owner};"
+
+_VICTIM_TREASURY_STAGE = """        // The owner's claim, measured from the same point as the victim's, so a payout the
+        // attack merely brought forward still counts as the owner's.
+        uint256 strangerPre = {measure_stranger};
+        (bool strangerOk, ) =
+            address(this).call(abi.encodeWithSignature("arbTreasuryStranger()"));
+        // A claim that reverts leaves its prank open -- forge does not unwind cheatcode
+        // state -- and the owner's claim would then run as the stranger. Close it at the
+        // same call depth it was opened at.
+        (bool closed, ) = address(this).call(abi.encodeWithSignature("arbEndPrank()"));
+        closed;
+        arbClaimPublic = strangerOk && {measure_stranger} > strangerPre;
+        (bool claimed, ) = address(this).call(abi.encodeWithSignature("arbTreasuryExit()"));
+        claimed;
+        uint256 ownerEnd = {measure_owner};
+        arbTreasuryRec = arbClaimPublic || ownerEnd <= ownerMid ? 0 : ownerEnd - ownerMid;"""
+
+# The victim's tokens: up to `endow` of what the deployer holds, by an ordinary transfer.
+# Setup cannot name the victim, so it cannot mint to them; most tokens mint their supply
+# to the deployer, which is the test contract. A token that does not leaves this a no-op
+# and victim_enter has to acquire tokens by a public path.
+_VICTIM_TOKEN_ENDOW = """        uint256 arbHeld = _ArbiterToken({token}).balanceOf(address(this));
+        if (arbHeld > 0) {{
+            (bool arbSent, ) = address({token}).call(abi.encodeWithSignature(
+                "transfer(address,uint256)", arbVictim, endow < arbHeld ? endow : arbHeld));
+            arbSent;
+        }}"""
+
+# The harness's own accounts, which code written before them may not name.
+_VICTIM_HARNESS_NAMES_RE = re.compile(r"\b(?:arbVictim|arbEoa|arbAtkEoa|arbStranger|arbiterVictim)\b")
+
+_VICTIM_ASSET_ERRORS = (
+    "error ArbiterGainNotFromTarget(uint256 attackerGain);\n"
+    "error ArbiterPaidInEther(uint256 attackerGain);\n"
+    "error ArbiterTreasuryNoHarm(uint256 recoveredWithoutAttack, uint256 recoveredWithAttack,\n"
+    "                            uint256 treasuryWithoutAttack, uint256 treasuryWithAttack,\n"
+    "                            uint256 attackerGain, bool claimPublic);\n"
+)
+
+_VICTIM_ASSET_FAIL = """        if (best.recA + best.tA <= best.recB + best.tB || best.g == 0 || best.g < shortfall) {{
+            {no_harm}
+        }}
+        if (!best.accounted) {{ revert ArbiterGainNotFromTarget(best.g); }}
+        if (best.paidEther) {{ revert ArbiterPaidInEther(best.g); }}"""
+
+_VICTIM_ASSET_FAIL_REQUIRE = """        if (best.recA + best.tA <= best.recB + best.tB || best.g == 0 || best.g < shortfall) {{
+            revert(string(abi.encodePacked(
+                "{no_harm_name}(withoutAttack=", _u(best.recA),
+                ", withAttack=", _u(best.recB),
+                ", treasuryWithoutAttack=", _u(best.tA),
+                ", treasuryWithAttack=", _u(best.tB),
+                ", attackerGain=", _u(best.g),
+                best.claimPublic ? string(", claimPublic=true)") : string(")")
+            )));
+        }}
+        if (!best.accounted) {{
+            revert(string(abi.encodePacked("ArbiterGainNotFromTarget(attackerGain=",
+                                           _u(best.g), ")")));
+        }}
+        if (best.paidEther) {{
+            revert(string(abi.encodePacked("ArbiterPaidInEther(attackerGain=",
+                                           _u(best.g), ")")));
+        }}"""
 
 
 # (endowment in wei, seconds warped, attack rounds) for the victim-loss predicate. Four
@@ -1945,6 +2291,64 @@ def _reject_standing(fragment: str, field: str) -> None:
     )
 
 
+# The names _VICTIM_TEMPLATE declares for itself. The identities are drawn per
+# composition so that setup cannot NAME them -- but they are contract-level constants of
+# the test contract, so setup could simply refer to them by identifier. Measured, in EOA
+# mode: deploy_code "Vault target = new Vault(); target.setOwner(arbEoa);" and
+# attack_body "target.sweep(arbEoa);" passed victim_loss against a correctly guarded
+# vault -- the depositor really lost, and the "attacker" was the owner setup appointed.
+# The same goes for the fixed preimage of arbAtkEoa, for the victim (setup pranking it
+# into an approval), and for the harness's own frames. Matched as whole identifiers, so a
+# string such as "arbiterVictim()" counts too.
+_HARNESS_ACCOUNTS = ("arbEoa", "arbAtkEoa")
+_HARNESS_VICTIM = ("arbVictim", "arbiterVictim", "_ArbiterHarness")
+_HARNESS_FRAMES = ("arbSetup", "arbEnter", "arbExit", "arbDeploy", "arbAttack",
+                   "arbTrial", "arbiterRun", "ARB_COMPLETED")
+# keccak256("arbiter.attacker") is arbAtkEoa; and the next CREATE address is the
+# attacker contract, which these cheatcodes would let setup compute.
+_HARNESS_DERIVATIONS = re.compile(
+    r"arbiter\.attacker"
+    r"|\b(?:computeCreateAddress|computeCreate2Address)\s*\("
+    r"|\bvm\s*\.\s*getNonce\s*\("
+)
+
+
+def _setup_names(mode: str) -> tuple[str, ...]:
+    # `atk` is declared only in contract mode; in EOA mode it is a free local name.
+    return (_HARNESS_ACCOUNTS + _HARNESS_VICTIM + _HARNESS_FRAMES
+            + (("atk",) if mode == "contract" else ()))
+
+
+def _victim_step_names(mode: str) -> tuple[str, ...]:
+    # The victim may name itself; it may not name the attacker or drive the harness.
+    return (_HARNESS_ACCOUNTS + _HARNESS_FRAMES
+            + (("atk",) if mode == "contract" else ()))
+
+
+def _reject_harness_names(fragment: str, field: str, names: tuple[str, ...]) -> None:
+    text = fragment or ""
+    hit = re.search(
+        "(?<![A-Za-z0-9_$])(" + "|".join(re.escape(n) for n in names) + ")(?![A-Za-z0-9_$])",
+        text,
+    )
+    found = hit.group(1) if hit else None
+    if found is None:
+        derived = _HARNESS_DERIVATIONS.search(text)
+        found = derived.group(0).rstrip("( ") if derived else None
+    if found is None:
+        return
+    raise ValueError(
+        f"{field} refers to {found!r}, which belongs to the harness. The victim's and the "
+        "attacker's accounts are drawn after you write setup and the victim's steps, so "
+        "neither may name them: a role, an approval or funds handed to the attacker "
+        "before the attack, or taken from the victim by setup, is the contract doing what "
+        "it was configured to do, not an attack. Build only the world any deployment "
+        "would have, and reach the victim's value with calls anybody could make. Your "
+        "Attacker may still look the victim up at run time with "
+        "_ArbiterHarness(msg.sender).arbiterVictim()."
+    )
+
+
 def _reject_forgery(fragment: str, field: str) -> None:
     """Refuse a cheatcode that fabricates what the attacker would have to earn."""
     match = _FORGERY_RE.search(fragment or "")
@@ -2007,13 +2411,21 @@ def _reject_halting(fragment: str, field: str) -> None:
         )
 
 
-def _first_error(output: str) -> str:
+def _first_error(output: str, solc: str = "") -> str:
     """The first compiler diagnostic that says something, for the run record.
 
     `Error: Compiler run failed:` is forge's banner, not a diagnostic -- it was 79 of the
     111 recorded failures and told us nothing about any of them. The numbered solc error
     underneath is the one worth keeping.
+
+    A compiler forge could not install (the sandbox has no network and a read-only root)
+    is reported as such, in zh-TW, with the versions that are available; `solc` is the
+    version foundry.toml pinned for this build, if any (solc_avail.explain_missing).
     """
+    from .solc_avail import explain_missing
+
+    if missing := explain_missing(output, solc):
+        return missing
     lines = [ln.strip() for ln in output.splitlines()]
     for line in lines:
         if re.match(r"Error \(\d+\)", line):

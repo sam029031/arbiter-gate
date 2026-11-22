@@ -58,7 +58,8 @@ def _mcp_tools(predicates) -> list[dict]:
 
 class Server:
     def __init__(self, ws: Workspace, outcome_path: Path, predicates) -> None:
-        self.disp = ToolDispatcher(ws)
+        # The same set the schema offers, so the enum is enforced, not advisory.
+        self.disp = ToolDispatcher(ws, predicates=predicates)
         self.outcome_path = outcome_path
         self.tools = _mcp_tools(predicates)
         self.terminal = False

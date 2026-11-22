@@ -16,6 +16,10 @@ The mapping (plan 7.4) keeps the gate's four verdicts apart:
                          not finish", never a pass.
 
 Uncovered changes (diffscan's unscanned_reasons, P5) go to run.properties.unscanned.
+A proven finding that first stood on a loose predicate carries the strict re-proof the gate
+asked for (findings[].strict_retry) in its result properties and one zh-TW sentence in its
+message (strict_retry_text, also used by the PR comment); run.properties.strict_retry counts
+them.
 Paths are relative (`uriBaseId` %SRCROOT%); the report is built from gate.json alone.
 """
 
@@ -37,6 +41,28 @@ TOOL_NAME = "ARBITER Gate"
 TOOL_URI = "https://github.com/sam029031/arbiter-gate"
 # GitHub reads `security-severity` (0.0-10.0) to rank alerts.
 _SECURITY_SEVERITY = {"critical": "9.5", "high": "8.0", "medium": "5.5", "low": "3.0"}
+# findings[].strict_retry (BRIEF 4.1): the strict re-proof after a proof under a loose predicate.
+STRICT_RETRY_KEYS = ("status", "predicate", "poc_name", "turns", "requests", "elapsed_s")
+_STRICT_MEANING = {"victim_loss": "受害者少拿回錢，而且差額在攻擊者手上",
+                   "liveness_broken": "攻擊後一般使用者的操作無法完成"}
+_STRICT_RETRY_WORDS = {"not_proven": "沒有成功；原本的寬鬆證實仍然成立，但沒有受害者損失的數字",
+                       "skipped": "沒有進行",
+                       "error": "沒有完成（執行錯誤）；原本的寬鬆證實仍然成立"}
+
+
+def strict_retry_text(sr: dict[str, Any] | None) -> str:
+    """findings[].strict_retry as one short zh-TW sentence; "" when there was no retry."""
+    if not isinstance(sr, dict) or not sr.get("status"):
+        return ""
+    st, pred = str(sr["status"]), sr.get("predicate") or "victim_loss"
+    if st == "proven":
+        words = f"成功，滿足 {pred}" + (f"（{_STRICT_MEANING[pred]}）" if pred in _STRICT_MEANING else "")
+    else:
+        words = _STRICT_RETRY_WORDS.get(st, f"狀態不明（{st}）")
+    cost = [f"{sr.get('turns')} 回合"] if sr.get("turns") is not None else []
+    cost += [f"{sr.get('requests')} 個 AI 請求"] if sr.get("requests") is not None else []
+    return (f"寬鬆條件證實 → 系統要求 AI 改用嚴格條件再證明一次：{words}。"
+            + (f"用了 {'、'.join(cost)}。" if cost else ""))
 
 
 def _slug(text: str) -> str:
@@ -82,6 +108,9 @@ def _proven_result(entry: dict[str, Any], f: dict[str, Any],
             f"以 {f.get('predicate')} 在 EVM 上證實（攻擊證明 {f.get('poc_name')}）。")
     if not f.get("predicate_strict"):
         text += f" {f.get('predicate_note') or ''}"
+    sr, retry = f.get("strict_retry"), strict_retry_text(f.get("strict_retry"))
+    if retry:
+        text = f"{text.strip()} {retry}"
     region = f.get("region") or {}
     uri = (entry.get("artifact") or {}).get("uri") or ""
     fingerprint = hashlib.sha256(
@@ -105,6 +134,8 @@ def _proven_result(entry: dict[str, Any], f: dict[str, Any],
                         for r in abg.get("environments") or []],
             "patch_status": patch.get("status"),
             "regression_status": (f.get("regression") or {}).get("status"),
+            **({"strict_retry": {**{k: sr.get(k) for k in STRICT_RETRY_KEYS}, "text": retry}}
+               if retry else {}),
         },
     }
 
@@ -165,6 +196,12 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
     if notifications:
         invocation["toolExecutionNotifications"] = notifications
     inp = report.get("input") or {}
+    retries = [str(f["strict_retry"]["status"]) for e in report.get("files") or []
+               if e.get("verdict") == PROVEN
+               for f in e.get("findings") or [] if strict_retry_text(f.get("strict_retry"))]
+    strict = ({"triggered": len(retries), "by_status": {st: retries.count(st) for st in dict.fromkeys(retries)},
+               "note": f"寬鬆條件證實後，系統要求 AI 改用嚴格條件再證明一次：{len(retries)} 次中 "
+                       f"{retries.count('proven')} 次成功"} if retries else None)
     return {
         "$schema": SARIF_SCHEMA,
         "version": SARIF_VERSION,
@@ -183,6 +220,7 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                 "generated_at": report.get("generated_at"),
                 "coverage": coverage,
                 "unscanned": report.get("unscanned_reasons") or [],
+                **({"strict_retry": strict} if strict else {}),
                 "no_provable_attack_note": f"{LABELS[NO_PROVABLE]}：不產生 alert；"
                                            "沒有 alert 不代表合約沒有漏洞。",
             },

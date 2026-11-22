@@ -50,6 +50,7 @@ def prove_dump(dump_dir: Path, port: int = 9400,
                only: str = "") -> dict[str, Any]:
     """Walk every dumped exploit up the ladder and record where each one stopped."""
     from .live_replay import (
+        NotSupported,
         Untranslatable,
         parse_poc,
         parse_poc_exploit,
@@ -99,6 +100,9 @@ def prove_dump(dump_dir: Path, port: int = 9400,
             ):
                 try:
                     live = run(parse(pocs[0], target, sample), Path(tmp), port + i * 4)
+                    break
+                except NotSupported as exc:
+                    live = {"not_supported": True, "reason": str(exc)}
                     break
                 except Untranslatable:
                     continue

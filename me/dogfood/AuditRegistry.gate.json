@@ -1,0 +1,91 @@
+{
+ "schema": "arbiter-gate/0.1",
+ "generated_at": "2026-11-21T23:27:52+0800",
+ "input": {
+  "mode": "file",
+  "file": "AuditRegistry.sol",
+  "run_id": "dogfood-registry-2",
+  "workspace_mode": "repo",
+  "llm_requests_this_invocation": 10,
+  "usage": {
+   "requests": 10,
+   "prompt_tokens": 118008,
+   "completion_tokens": 7529,
+   "cost_usd": 0.0,
+   "retries": 0,
+   "http_errors": 0,
+   "parse_failures": 0,
+   "reasoning_recoveries": 8,
+   "system_fingerprints": [
+    "fp_ollama"
+   ],
+   "models_seen": [
+    "arbiter-gpt:latest"
+   ]
+  },
+  "results": "runs/gate/dogfood-registry-2/dogfood-registry-2.results.jsonl",
+  "llm_requests_audit": 10,
+  "llm_requests_repair": 0,
+  "sandbox": {
+   "status": "off"
+  }
+ },
+ "models": [
+  "arbiter-gpt:latest"
+ ],
+ "patches_file": null,
+ "repair": true,
+ "exit_code": 0,
+ "files": [
+  {
+   "id": "file::AuditRegistry",
+   "path": "runs/gate/dogfood-registry-2/dogfood/AuditRegistry.sol",
+   "artifact": {
+    "uri": "AuditRegistry.sol",
+    "sha256": "df309e67d89ed4d7647b52cc3a86cf8540de38de2ab93ac2939734bdb9f34654"
+   },
+   "verdict": "static_hint_unproven",
+   "label": "靜態工具提示但未證實",
+   "reason": "agent_concluded_no_attack",
+   "detail": "",
+   "turns": 10,
+   "elapsed_s": 214.6,
+   "static_analysis": {
+    "status": "ran",
+    "label": "",
+    "reason": "",
+    "tool": "slither 0.11.6",
+    "solc": "0.8.24",
+    "threshold": "impact ≥ Medium 且 confidence ≥ Medium",
+    "findings_total": 3,
+    "hints": [
+     {
+      "check": "incorrect-equality",
+      "impact": "Medium",
+      "confidence": "High",
+      "line": 94,
+      "end_line": 135,
+      "function": "register",
+      "message": "AuditRegistry.register(AuditRegistry.RecordInput) (AuditRegistry.sol#94-135) uses a dangerous strict equality:"
+     }
+    ]
+   },
+   "fixture_note": "",
+   "static_hints": [
+    {
+     "check": "incorrect-equality",
+     "impact": "Medium",
+     "confidence": "High",
+     "line": 94,
+     "end_line": 135,
+     "function": "register",
+     "message": "AuditRegistry.register(AuditRegistry.RecordInput) (AuditRegistry.sol#94-135) uses a dangerous strict equality:"
+    }
+   ],
+   "hint_note": "這是自動掃描工具的提示，系統沒有證實它真的能被攻擊。",
+   "findings": []
+  }
+ ],
+ "elapsed_s": 216.34,
+ "note": "已證實可攻擊的判定附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。"
+}

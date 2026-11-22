@@ -62,6 +62,11 @@ REFUSAL_SIGNATURES = {
     "predicate: no gain": r"ArbiterNoGain",
     "exploit did not compile": r"did NOT compile|EXPLOIT .* failed to compile",
     "exploit ran, extracted nothing": r"compiled but did NOT satisfy",
+    "predicate not accepted here": r"is not accepted in this audit|run_exploit needs a predicate",
+    "setup names a harness account": r"which belongs to the harness|names the harness account",
+    "predicate: treasury no harm": r"ArbiterTreasuryNoHarm",
+    "predicate: gain not from target": r"ArbiterGainNotFromTarget",
+    "predicate: attacker paid ether": r"ArbiterPaidInEther",
 }
 
 _TOOLCHAIN_SAFE_REFUSED = (
@@ -94,8 +99,111 @@ ALL_PREDICATES = ("victim_loss", "liveness_broken", "eth_profit",
 STRICT_PREDICATES = ("victim_loss", "liveness_broken")
 
 
+def offered_predicates(predicates: Any = None) -> tuple[str, ...]:
+    """The predicates an audit accepts, strict first. Empty or None means all five.
+
+    One answer shared by the schema the model sees and the dispatcher that runs its
+    calls. They used to disagree: the schema's enum was the strict pair while the
+    dispatcher accepted any name and read a missing predicate as eth_profit, so the
+    enum steered nothing and the description advertised predicates the enum omitted.
+    """
+    if not predicates:
+        return ALL_PREDICATES
+    asked = {str(p).strip() for p in predicates}
+    unknown = sorted(asked - set(ALL_PREDICATES))
+    if unknown:
+        raise ValueError(f"unknown predicate(s) {unknown}; choose from {list(ALL_PREDICATES)}")
+    return tuple(p for p in ALL_PREDICATES if p in asked)
+
+
+_RUN_EXPLOIT_HEAD = (
+    "Run an adjudicated exploit. THIS IS THE ONLY EVIDENCE THAT CAN "
+    "BACK A FINDING. You supply the deployment and the attack; the harness "
+    "writes the success condition itself and you cannot change it. "
+    "Requirements: (a) deploy_code must assign the contract under audit to a "
+    "local variable literally named 'target', e.g. 'UtopiaVault target = new "
+    "UtopiaVault{value: 10 ether}();'; (b) attacker_code must define a contract "
+    "literally named 'Attacker' with 'constructor(address)' and a function "
+    "'attack() external'; it may also define helper contracts and a receive() "
+    "function. IMPORTANT: if the target guards with require(msg.sender == "
+    "tx.origin), a contract attacker is impossible -- set mode='eoa' instead and "
+    "supply attack_body, plain Solidity statements that the harness runs from a "
+    "real externally owned account (it is both msg.sender and tx.origin), "
+    "operating on the variable 'target'. deploy_code may set up scenario state "
+    "(fund the contract, mint tokens, wire collaborators) before the measurement "
+    "starts, but it cannot name the accounts the harness draws for the attacker "
+    "and the victim. "
+)
+_RUN_EXPLOIT_VICTIM = (
+    "Predicates, strongest evidence first. victim_loss -- use it whenever "
+    "someone other than the attacker loses value. Give victim_enter and "
+    "victim_exit: what an ordinary user does to put value into the contract and "
+    "to take it back out. The harness runs setup, victim_enter, your attack, "
+    "victim_exit, and the same again without your attack, in 4 environments: the "
+    "victim holding 10 ether, the victim holding 10000 ether, one week later, and "
+    "your attack repeated 8 times. It passes only if, in one environment, the "
+    "victim recovers strictly LESS because your attack ran AND the attacker "
+    "gained at least what the victim lost -- so value that setup put in and the "
+    "attack took back out proves nothing. It measures ether; if token_expr names "
+    "an ERC20, it compares the victim's and the attacker's balances of that token "
+    "instead. No honest_body is needed. "
+)
+_RUN_EXPLOIT_LIVENESS = (
+    "liveness_broken -- denial of service, where the attacker gains nothing: give "
+    "liveness_call, an operation an ordinary user can complete, and honest_body; "
+    "the harness checks the call succeeds before your attack and fails after. "
+)
+_LOOSE_MEANING = {
+    "eth_profit": "eth_profit (the attacker ends up with more ether)",
+    "token_profit": "token_profit (the attacker's balance of the ERC20 named by "
+                    "token_expr goes up)",
+    "state_change": "state_change (state that an honest user cannot move, named by "
+                    "observed_getter, is moved by an unprivileged account)",
+}
+_RUN_EXPLOIT_LOOSE = (
+    "Weaker predicates, for an attack neither strict predicate above can express: "
+    "{listed}. The usual case is value that belongs to the contract itself rather "
+    "than to a depositor -- a treasury, collected fees, a prize pool -- which no "
+    "victim_enter/victim_exit can show; prove such a theft with one of these "
+    "instead of concluding safe. Each compares your attack against honest_body, "
+    "the intended happy path, which you write yourself, and your attack has to "
+    "beat it strictly; "
+    "collecting a reward the contract grants by design is not an exploit. Because "
+    "you write the baseline, a pass here is weaker evidence: it is reported as a "
+    "loose proof, it cannot be measured or patched, and you may be asked to prove "
+    "the same attack again under victim_loss. "
+)
+_RUN_EXPLOIT_TAIL = (
+    "Whichever predicate you use, the harness then deletes your attack and runs "
+    "the scenario again; if the predicate still holds, the proof is refused."
+)
+
+
+def _eoa_self_name(predicates: tuple[str, ...]) -> str:
+    """How an EOA attack names its own account, which no description used to say."""
+    names = []
+    if "victim_loss" in predicates:
+        names.append("'arbEoa' under victim_loss")
+    if any(p != "victim_loss" for p in predicates):
+        names.append("'eoa' under the other predicates")
+    return ". Your own address there is " + " and ".join(names) + "."
+
+
+def _run_exploit_description(predicates: tuple[str, ...]) -> str:
+    """The run_exploit description, saying exactly what this audit accepts."""
+    loose = [p for p in predicates if p not in STRICT_PREDICATES]
+    return (
+        _RUN_EXPLOIT_HEAD
+        + (_RUN_EXPLOIT_VICTIM if "victim_loss" in predicates else "")
+        + (_RUN_EXPLOIT_LIVENESS if "liveness_broken" in predicates else "")
+        + (_RUN_EXPLOIT_LOOSE.format(listed="; ".join(_LOOSE_MEANING[p] for p in loose))
+           if loose else "")
+        + _RUN_EXPLOIT_TAIL
+    )
+
+
 def tool_schemas(
-    predicates: tuple[str, ...] = STRICT_PREDICATES,
+    predicates: tuple[str, ...] = ALL_PREDICATES,
 ) -> list[dict[str, Any]]:
     """OpenAI-style function schemas for the gateway's native tool calling.
 
@@ -104,7 +212,83 @@ def tool_schemas(
     positives the permissive set never found and lost ten -- the predicates were
     steering what the agent looked for, not only what it was allowed to keep. A
     cascade therefore generates under one set and adjudicates under another.
+
+    The default was the strict pair until the ME build. It never constrained anything
+    (ToolDispatcher ran whatever predicate arrived), so the default is now the set the
+    dispatcher actually accepts, and the run_exploit description and enum are built
+    from it: what the model is told is what the harness will run.
     """
+    predicates = offered_predicates(predicates)
+    loose = [p for p in predicates if p not in STRICT_PREDICATES]
+    run_exploit_extra: dict[str, Any] = {}
+    if any(p != "victim_loss" for p in predicates):
+        run_exploit_extra["honest_body"] = {
+            "type": "string",
+            "description": (
+                "Not used by victim_loss; REQUIRED by every other predicate. "
+                "Solidity statements an ordinary, non-attacking user would run "
+                "against 'target' -- the intended happy path, e.g. "
+                "'target.claim(); target.withdraw();'. The harness runs this first "
+                "as a separate funded account."
+                + (
+                    " For a profit predicate your exploit must produce STRICTLY MORE "
+                    "gain than it does; for state_change, the getter you name must be "
+                    "UNMOVED by the honest path, which is how the harness checks the "
+                    "state really is privileged. This is why merely collecting a "
+                    "reward the contract hands out by design does not count as an "
+                    "exploit." if loose else ""
+                )
+            ),
+        }
+    if "liveness_broken" in predicates:
+        run_exploit_extra["liveness_call"] = {
+            "type": "string",
+            "description": (
+                "For liveness_broken (denial of service). An "
+                "abi.encodeWithSignature(...) expression for an "
+                "operation an ordinary user can complete, e.g. "
+                "abi.encodeWithSignature(\"claim()\"). The harness "
+                "checks it SUCCEEDS before your attack and FAILS after."
+            ),
+        }
+    run_exploit_extra["token_expr"] = {
+        "type": "string",
+        "description": (
+            "A Solidity expression for an ERC20 that must be in scope from "
+            "deploy_code, e.g. 'address(usdg)'. "
+            + ("With victim_loss every party is then measured in that token: the "
+               "victim is handed up to the environment's endowment of the deployer's "
+               "own tokens (or acquires them in victim_enter by a public path), and "
+               "the attacker's gain must leave the contract under audit or the "
+               "victim's wallet, without spending ether. "
+               if "victim_loss" in predicates else "")
+            + ("With token_profit, it is the token whose balance should rise."
+               if "token_profit" in predicates else "")
+        ).strip(),
+    }
+    if "victim_loss" in predicates:
+        run_exploit_extra["treasury_exit"] = {
+            "type": "string",
+            "description": (
+                "Optional, for victim_loss when the value at stake is the "
+                "protocol's own (a fee pot, a treasury). The owner's "
+                "legitimate claim, e.g. 'target.withdrawFees();'. The "
+                "deployer -- the account that ran deploy_code -- runs it "
+                "after the victim exits, in both worlds; what the owner "
+                "recovers counts as a second victim. It counts only if "
+                "the owner really recovers something with no attack, and "
+                "not at all if a stranger could collect it too."
+            ),
+        }
+    if "state_change" in predicates:
+        run_exploit_extra["observed_getter"] = {
+            "type": "string",
+            "description": (
+                "Required for state_change. A zero-argument public view "
+                "function with its signature, e.g. 'owner()' or "
+                "'totalSupply()'."
+            ),
+        }
     return [
         {
             "type": "function",
@@ -200,36 +384,7 @@ def tool_schemas(
             "type": "function",
             "function": {
                 "name": "run_exploit",
-                "description": (
-                    "Run an adjudicated exploit. THIS IS THE ONLY EVIDENCE THAT CAN "
-                    "BACK A FINDING. You supply the deployment and an attacker "
-                    "contract; the harness writes the success condition itself and you "
-                    "cannot change it. Requirements: (a) deploy_code must assign the "
-                    "contract under audit to a local variable literally named 'target', "
-                    "e.g. 'UtopiaVault target = new UtopiaVault{value: 10 ether}();'; "
-                    "(b) attacker_code must define a contract literally named 'Attacker' "
-                    "with 'constructor(address)' and a function 'attack() external'; it "
-                    "may also define helper contracts and a receive() function. "
-                    "IMPORTANT: if the target guards with require(msg.sender == "
-                    "tx.origin), a contract attacker is impossible -- set mode='eoa' "
-                    "instead and supply attack_body, plain Solidity statements that the "
-                    "harness runs from a real externally owned account under "
-                    "vm.startPrank(eoa, eoa), operating on the variable 'target'. "
-                    "deploy_code may also set up scenario state (fund the contract, "
-                    "have the owner airdrop to eoa) before the measurement starts. "
-                    "Every profit predicate is DIFFERENTIAL: you must also give "
-                    "honest_body, the intended happy path, and your attack has to beat "
-                    "it strictly. Collecting a reward the contract grants by design is "
-                    "not an exploit. "
-                    "Predicates: eth_profit (attacker ends up with more ether), "
-                    "token_profit (attacker's balance of the token named by token_expr "
-                    "goes up -- use this whenever the value stolen is an ERC20), or "
-                    "state_change (state that an honest user cannot move, moved by an "
-                    "unprivileged account), or liveness_broken (an operation an "
-                    "ordinary user could complete stops working after your attack -- "
-                    "use this for denial of service, where the attacker gains nothing). "
-                    "Every predicate is differential."
-                ),
+                "description": _run_exploit_description(predicates),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -258,6 +413,8 @@ def tool_schemas(
                             # the same agent that writes the attack -- but they also
                             # generate breadth the strict pair does not, so a cascade
                             # keeps them for generation and refuses them for acceptance.
+                            # ToolDispatcher refuses anything outside this list, and a
+                            # missing predicate, so the enum is now a rule, not a hint.
                             "enum": list(predicates),
                         },
                         "victim_enter": {
@@ -297,50 +454,10 @@ def tool_schemas(
                             "description": (
                                 "For mode='eoa'. Solidity statements run as the "
                                 "attacker EOA, e.g. 'target.redeem(1000e9);'"
+                                + _eoa_self_name(predicates)
                             ),
                         },
-                        "honest_body": {
-                            "type": "string",
-                            "description": (
-                                "REQUIRED for every predicate. Solidity "
-                                "statements an ordinary, non-attacking user would run "
-                                "against 'target' -- the intended happy path, e.g. "
-                                "'target.claim(); target.withdraw();'. The harness runs "
-                                "this first as a separate funded account. For a profit "
-                                "predicate your exploit must produce STRICTLY MORE gain "
-                                "than it does; for state_change, the getter you name must "
-                                "be UNMOVED by the honest path, which is how the harness "
-                                "checks the state really is privileged. "
-                                "This is why merely collecting a reward the contract "
-                                "hands out by design does not count as an exploit."
-                            ),
-                        },
-                        "liveness_call": {
-                            "type": "string",
-                            "description": (
-                                "For liveness_broken (denial of service). An "
-                                "abi.encodeWithSignature(...) expression for an "
-                                "operation an ordinary user can complete, e.g. "
-                                "abi.encodeWithSignature(\"claim()\"). The harness "
-                                "checks it SUCCEEDS before your attack and FAILS after."
-                            ),
-                        },
-                        "token_expr": {
-                            "type": "string",
-                            "description": (
-                                "For token_profit. A Solidity expression for the token "
-                                "whose balance should rise, e.g. 'address(usdg)' -- it "
-                                "must be in scope from deploy_code."
-                            ),
-                        },
-                        "observed_getter": {
-                            "type": "string",
-                            "description": (
-                                "Required for state_change. A zero-argument public view "
-                                "function with its signature, e.g. 'owner()' or "
-                                "'totalSupply()'."
-                            ),
-                        },
+                        **run_exploit_extra,
                         "imports": {
                             "type": "array",
                             "items": {"type": "string"},
@@ -594,8 +711,11 @@ class ToolDispatcher:
     # being an alternative to using the EVM.
     MAX_RECON_BEFORE_EXPLOIT = 10
 
-    def __init__(self, workspace: Workspace) -> None:
+    def __init__(self, workspace: Workspace, predicates: Any = None) -> None:
         self.ws = workspace
+        # The predicates run_exploit accepts; the schema's enum is built from the same
+        # call (agent.audit), so the model is told exactly what will run. None: all five.
+        self.predicates = offered_predicates(predicates)
         self.outcome = AgentOutcome()
         self._poc_by_name: dict[str, PocRecord] = {}
         self._freeform_calls = 0
@@ -786,7 +906,27 @@ class ToolDispatcher:
     def _run_exploit(self, args: dict[str, Any]) -> tuple[str, bool]:
         """Compile and run an exploit whose success condition the harness owns."""
         raw_name = str(args.get("name") or "exploit")
-        predicate = str(args.get("predicate") or "eth_profit")
+        predicate = str(args.get("predicate") or "").strip()
+        # Checked before anything is counted or compiled: a refused predicate never
+        # reached the harness, so it is not an attempt. A missing predicate used to run
+        # as eth_profit, and a name outside the schema's enum ran as well, which is how
+        # an audit offered only the strict pair still produced loose proofs.
+        if not predicate:
+            return (
+                "error: run_exploit needs a predicate. This audit accepts: "
+                f"{', '.join(self.predicates)}.",
+                False,
+            )
+        if predicate not in self.predicates:
+            return (
+                f"error: predicate {predicate!r} is not accepted in this audit. Use one "
+                f"of: {', '.join(self.predicates)}."
+                + (" For a theft, victim_loss: give victim_enter and victim_exit, and the "
+                   "harness checks that the victim recovers less because your attack ran "
+                   "and that you hold what they lost."
+                   if "victim_loss" in self.predicates else ""),
+                False,
+            )
         hypothesis = str(args.get("hypothesis") or "")
         attacker_code = str(args.get("attacker_code") or "")
         deploy_code = str(args.get("deploy_code") or "")
@@ -828,6 +968,7 @@ class ToolDispatcher:
                     mode=mode,
                     token_expr=str(args.get("token_expr") or ""),
                     extra_imports=[str(x) for x in (args.get("imports") or [])],
+                    treasury_exit=str(args.get("treasury_exit") or ""),
                 )
                 return self._finish_exploit(
                     raw_name, solidity, hypothesis, predicate, repeated, sweep=False

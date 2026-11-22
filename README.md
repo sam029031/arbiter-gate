@@ -1,3 +1,6 @@
+> **MetaEarth Hackathon 2026: BEACON 版本（分支 `me-hackathon`）**：ARBITER Gate × ME Network，AI 稽核結果的鏈上證據 → [`me/README.md`](me/README.md)。
+> InnoServe 2026 決賽版說明 → `innoserve/README.md`（公開 repo）。以下是 AIS3 時期的原始說明。
+
 # ARBITER
 
 **Proof-carrying smart-contract auditing.** A finding is a transcript of an execution,
