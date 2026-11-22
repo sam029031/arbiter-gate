@@ -25,8 +25,13 @@
   const LOG_SPAN = 10000; // ME's eth_getLogs accepts at most 10,000 blocks per query
   const LOG_WINDOWS = 8; // windows scanned after a record's block when a node limits the range
 
-  const S = { params: {}, net: null, chainId: null, block: null, dep: null, registry: null, escrow: null,
-              count: null, ethers: false, run: 0, cache: new Map(), cosmos: new Map(), registryCodeOk: null };
+  // Trust (verify-lib "official deployment or not"): rpcOfficial = the node is the network's own
+  // (built into the page, or named by the deployment file); file = that deployment file (never one
+  // for a node from the URL); trust = L.trustLevel(...); dep = file, only for the official
+  // deployment (auditor list, public commits); registryFrom/escrowFrom = "file" | "url".
+  const S = { params: {}, net: null, chainId: null, block: null, dep: null, file: null, registry: null, escrow: null,
+              count: null, ethers: false, run: 0, cache: new Map(), cosmos: new Map(), rpcOfficial: false, trust: null,
+              registryFrom: null, escrowFrom: null, code: null, escrowVerified: false };
 
   // ------------------------------------------------------------------ DOM helpers
   const $ = (id) => document.getElementById(id);
@@ -82,6 +87,11 @@
       kind ? exLink(kind, value) : null);
   }
   const pending = (text) => h("span", { class: "mute small pending" }, text);
+  /** The node a reader should ask to check a transaction without this page: on ME (chain 400)
+   * always ME's own RPC, never a node the link named. */
+  const checkRpc = () => (S.chainId === NETWORKS["me-testnet"].chainId ? NETWORKS["me-testnet"].rpc : S.net.rpc);
+  const verified = () => !!(S.trust && S.trust.verified);
+  const unvTag = (text = "未驗證") => h("span", { class: "tag unv" }, text);
 
   /** A transaction: its 0x hash (always, with a copy button), then a link to the ME explorer
    * once the Hub RPC has reported the Cosmos tx the explorer indexes. Without that link (lookup
@@ -92,7 +102,7 @@
       h("span", { class: "inline" }, h("span", { class: "mono", title: hash }, L.shortHex(hash, 10, 8)), copyBtn(hash, "複製雜湊")),
       tail);
     const showCommand = (why) => {
-      const cmd = L.selfCheckCommand(hash, S.net.rpc);
+      const cmd = L.selfCheckCommand(hash, checkRpc());
       tail.replaceChildren(h("span", { class: "selfcheck" }, h("span", { class: "mute small" }, why),
         cmd ? h("span", { class: "inline" }, h("code", { class: "mono" }, cmd), copyBtn(cmd, "複製指令")) : null));
     };
@@ -106,7 +116,7 @@
       if (!url) return showCommand("區塊瀏覽器查不到這筆交易的對應紀錄（瀏覽器以 Cosmos 交易雜湊索引）；可以用 Foundry 自己讀：");
       // the explorer is sometimes down: keep the command that reads the receipt from the chain at hand
       const block = L.explorerUrl(S.net.explorer, "block", c.height);
-      const cmd = L.selfCheckCommand(hash, S.net.rpc);
+      const cmd = L.selfCheckCommand(hash, checkRpc());
       tail.replaceChildren(extLink(url, "在區塊瀏覽器查看"),
         h("span", { class: "mute small", title: c.hash }, `Cosmos 交易 ${L.shortHex(c.hash, 6, 6)} · `,
           extLink(block, `區塊 #${c.height.toLocaleString("en-US")}`) || `區塊 #${c.height}`),
@@ -144,9 +154,10 @@
     return dl;
   }
   const loading = (text) => h("p", { class: "loading", role: "status" }, text);
+  /** Every view starts with what the page cannot vouch for, when there is anything (trustCard). */
   function setResult(...nodes) {
     const box = $("result");
-    box.replaceChildren(...nodes);
+    box.replaceChildren(...[trustCard(), ...nodes].filter(Boolean));
     box.removeAttribute("aria-busy");
   }
   function begin(text) {
@@ -300,12 +311,15 @@
   async function connect() {
     const p = S.params;
     const key = p.net || "me-testnet";
-    S.net = { ...NETWORKS[key] };
+    S.net = { ...NETWORKS[key], home: key === "custom" ? null : NETWORKS[key] };
     if (key === "custom") S.net.rpc = p.rpc || "";
-    Object.assign(S, { chainId: null, block: null, dep: null, registry: null, escrow: null, count: null,
-                       registryCodeOk: null, registryMissing: null, escrowMismatch: null, loadError: null,
+    Object.assign(S, { chainId: null, block: null, dep: null, file: null, registry: null, escrow: null, count: null,
+                       registryMissing: null, registryRefused: null, registryCodehash: null, escrowMismatch: null,
+                       escrowRejected: null, escrowIgnored: null, loadError: null, rpcOfficial: key !== "custom",
+                       trust: null, registryFrom: null, escrowFrom: null, code: null, escrowVerified: false,
                        cache: new Map(), cosmos: new Map() });
     fillNetForm();
+    renderTrust();
     $("hero-net").textContent = `${S.net.name} · AuditRegistry`;
     $("net-info").replaceChildren();
     if (!S.net.rpc) {
@@ -332,20 +346,38 @@
       return;
     }
     if (key === "custom") {
-      const known = Object.values(NETWORKS).find((n) => n.chainId === S.chainId);
-      if (known) {
-        Object.assign(S.net, { explorer: known.explorer, hubRpc: known.hubRpc, symbol: known.symbol,
-                               deployments: known.deployments });
+      // The node says which chain it is, so nothing the page knows about that chain is taken on
+      // its word: the deployment file and the network's name apply only when the node is the
+      // network's own (its built-in RPC here, or the one the deployment file names: loadContracts).
+      // Explorer links still work: they are looked up through the network's own Hub, so they can
+      // only lead to real transactions.
+      const home = Object.values(NETWORKS).find((n) => n.key !== "custom" && n.chainId === S.chainId);
+      if (home) {
+        Object.assign(S.net, { home, explorer: home.explorer, hubRpc: home.hubRpc, symbol: home.symbol,
+                               deployments: home.deployments });
+        if (L.sameRpc(S.net.rpc, home.rpc)) S.rpcOfficial = true;
       }
-      S.net.name = known ? `${known.name}（自訂 RPC）` : `chainId ${S.chainId}`;
+      S.net.name = `自訂 RPC（chainId ${S.chainId}）`;
     }
-    setPill("ok", `${S.net.name} · 區塊 #${S.block.toLocaleString("en-US")}`);
-    $("hero-net").textContent = `${S.net.name} · AuditRegistry`;
     await loadContracts(run);
     if (stale(run)) return;
+    if (key === "custom" && S.rpcOfficial && S.net.home) S.net.name = S.net.home.name;
+    showPill();
+    $("hero-net").textContent = `${S.net.name} · ${S.registryFrom === "url" ? "網址指定的 AuditRegistry" : "AuditRegistry"}`;
+    renderTrust();
     renderNetInfo();
+    paramWarnings();
     if (!S.registry) return renderNotDeployed();
     await route(run);
+  }
+
+  function showPill() {
+    const block = `區塊 #${S.block.toLocaleString("en-US")}`;
+    const t = S.trust;
+    if (S.registryRefused) return setPill("bad", `${S.net.name} · AuditRegistry 程式碼不符`);
+    if (!S.rpcOfficial) return setPill("warn", `${S.net.name} · 非官方來源 · ${block}`);
+    if (t && !t.official) return setPill("warn", `${S.net.name} · ${t.level === "genuine" ? "非官方部署" : "未驗證"} · ${block}`);
+    setPill("ok", `${S.net.name} · ${block}`);
   }
 
   async function loadDeploymentsFile(name) {
@@ -366,14 +398,23 @@
     return null;
   }
 
+  const keccak = (code) => (S.ethers && typeof code === "string" && /^0x[0-9a-fA-F]*$/.test(code) ? window.ethers.keccak256(code) : null);
+
+  /**
+   * Which registry and escrow to read, and how far the page vouches for them (verify-lib
+   * chooseContracts / codeCheck / trustLevel). The official deployment is the deployment file's
+   * AuditRegistry, read through the network's own node, whose runtime code hashes to what the
+   * file recorded; only then are the file's auditor list and public commits used (S.dep).
+   */
   async function loadContracts(run) {
-    const p = S.params;
     const file = await loadDeploymentsFile(S.net.deployments);
     if (stale(run)) return;
-    S.registry = p.registry || (file && file.registry) || null;
-    S.escrow = p.registry ? p.escrow || null : p.escrow || (file && file.escrow) || null;
-    // the auditor list and public commits only describe the registry that file names
-    S.dep = file && file.registry === S.registry ? file : null;
+    // a node named in the URL counts as the network's own only when the deployment file names it
+    if (!S.rpcOfficial && file && L.sameRpc(file.rpc, S.net.rpc)) S.rpcOfficial = true;
+    const trusted = S.rpcOfficial ? file : null;
+    const pick = L.chooseContracts(S.params, trusted);
+    Object.assign(S, { file: trusted, registry: pick.registry, registryFrom: pick.registryFrom, escrow: pick.escrow,
+                       escrowFrom: pick.escrowFrom, escrowIgnored: pick.ignoredEscrow });
     if (!S.registry) return;
     try {
       const code = await rpc("eth_getCode", [S.registry, "latest"]);
@@ -382,20 +423,121 @@
         S.registry = null;
         return;
       }
-      if (S.ethers && S.dep && S.dep.registryCodehash) {
-        S.registryCodeOk = L.sameHash(window.ethers.keccak256(code), S.dep.registryCodehash);
+      S.registryCodehash = keccak(code);
+      S.code = L.codeCheck(S.registryCodehash, trusted && trusted.registryCodehash);
+      S.trust = L.trustLevel({ rpcOfficial: S.rpcOfficial, registryFrom: S.registryFrom, code: S.code });
+      if (S.trust.level === "fake") {
+        // whatever this contract answers (records, auditors, deployments) could be made up: read nothing
+        Object.assign(S, { registryRefused: S.registry, registry: null, escrow: null });
+        return;
       }
+      S.dep = S.trust.official ? trusted : null;
       await getCount();
-      if (S.escrow) {
-        const reg = L.decodeAddress(await call(S.escrow, "registry"));
-        if (reg !== S.registry) {
-          S.escrowMismatch = S.escrow;
-          S.escrow = null;
-        }
-      }
+      if (S.escrow) await checkEscrow(trusted);
     } catch (e) {
       S.loadError = e.message || String(e);
     }
+  }
+
+  /** The escrow must answer registry() with this registry. Beside a verified registry its code
+   * must also be AuditEscrow's (the deployment file's hash, with the registry immutable rebound);
+   * otherwise it is ignored. Beside an unverified registry it is shown, marked unverified. */
+  async function checkEscrow(trusted) {
+    let reg = null;
+    try { reg = L.decodeAddress(await call(S.escrow, "registry")); } catch (e) { /* not an escrow at all */ }
+    if (reg !== S.registry) {
+      Object.assign(S, { escrowMismatch: S.escrow, escrow: null });
+      return;
+    }
+    if (!S.trust.verified) return; // S.escrowVerified stays false: shown with an "unverified" mark
+    const code = await rpc("eth_getCode", [S.escrow, "latest"]);
+    const check = L.codeCheck(keccak(L.rebindRegistry(code, S.registry, trusted.registry)), trusted.escrowCodehash);
+    if (check === "match") S.escrowVerified = true;
+    else Object.assign(S, { escrowRejected: { address: S.escrow, why: check }, escrow: null });
+  }
+
+  // ------------------------------------------------------------------ what the page cannot vouch for
+  const homeKey = () => (S.net && S.net.home ? S.net.home.key : "me-testnet");
+  const officialLink = (text, cls) =>
+    h("a", { href: location.pathname + L.officialSearch(S.params, homeKey()), class: cls }, text);
+
+  /** [{tone: "warn"|"bad", short, text}]: empty for the official deployment (and before connecting). */
+  function trustNotes() {
+    if (S.chainId == null) return [];
+    const notes = [];
+    const add = (tone, short, text) => notes.push({ tone, short, text });
+    const addr = (a) => fmtAddr(a);
+    if (!S.rpcOfficial) {
+      add("warn", `網址指定的節點 ${hostOf(S.net.rpc)}`,
+        `資料來自網址指定的節點 ${hostOf(S.net.rpc)}，不是頁面內建或部署紀錄檔列出的官方節點；它回傳的紀錄、程式碼和交易都可能是捏造的。`);
+    }
+    if (S.registryRefused) {
+      add("bad", "AuditRegistry 程式碼不符", S.registryFrom === "url"
+        ? `網址指定的 AuditRegistry ${addr(S.registryRefused)} 的程式碼雜湊和官方 AuditRegistry 不同：它不是 AuditRegistry，可能是仿冒的合約。頁面不讀取它的任何資料。`
+        : `部署紀錄檔裡的 AuditRegistry ${addr(S.registryRefused)} 上的程式碼和紀錄的雜湊不同（測試網可能重置過，或部署紀錄檔過期）；頁面不讀取它的任何資料。`);
+    } else if (S.registryFrom === "url" && (S.registry || S.registryMissing)) {
+      const a = S.registry || S.registryMissing;
+      add("warn", `網址指定的 AuditRegistry ${L.shortHex(addr(a), 8, 6)}`,
+        `AuditRegistry ${addr(a)} 由網址指定，不是官方部署紀錄檔裡的合約。` +
+        (S.trust && S.trust.level === "genuine"
+          ? "它的程式碼和官方 AuditRegistry 相同（確實是 AuditRegistry），但任何人都能自己部署一份，官方的稽核者清單不適用於它。" : ""));
+    }
+    if (S.trust && S.trust.level === "unverified" && S.rpcOfficial) {
+      add("warn", "無法比對 AuditRegistry 的程式碼", !S.ethers
+        ? "瀏覽器沒有載入 keccak256 函式庫（ethers），無法比對 AuditRegistry 的程式碼雜湊，所以不能當成官方部署。"
+        : S.file ? "部署紀錄檔沒有記下 AuditRegistry 的程式碼雜湊，無法確認它是官方部署。"
+          : "這個網路沒有部署紀錄檔，無法比對 AuditRegistry 的程式碼雜湊。");
+    }
+    if (S.escrow && !S.escrowVerified) {
+      add("warn", "未驗證的 AuditEscrow", `AuditEscrow ${addr(S.escrow)}（${S.escrowFrom === "url" ? "網址指定" : "部署紀錄檔"}）` +
+        "沒有經過程式碼驗證；付費託管的內容可能是捏造的。");
+    }
+    if (S.escrowRejected) {
+      add("warn", "AuditEscrow 已忽略", `AuditEscrow ${addr(S.escrowRejected.address)} ` + (S.escrowRejected.why === "mismatch"
+        ? "的程式碼和官方 AuditEscrow 不同，已忽略。" : "無法比對它的程式碼（部署紀錄檔沒有 AuditEscrow 的程式碼雜湊可比），已忽略。"));
+    }
+    return notes;
+  }
+
+  /** The warning card at the top of every view (setResult). */
+  function trustCard() {
+    const notes = trustNotes();
+    if (!notes.length) return null;
+    const t = S.trust;
+    const bad = notes.some((n) => n.tone === "bad");
+    const title = bad ? (S.registryFrom === "url" ? "警告：網址指定的合約不是 AuditRegistry" : "警告：AuditRegistry 沒有通過程式碼檢查")
+      : t && t.official ? "注意" : "非官方來源：頁面沒有替這些資料背書";
+    const after = S.registryRefused ? null
+      : !verified() ? "所以這一頁不顯示「✓」稽核者標記，判定和部署標成「未驗證」。"
+        : !t.official ? "所以這一頁不顯示「✓」稽核者標記。" : null;
+    const showLink = S.registryFrom === "url" || !S.rpcOfficial;
+    return h("section", { class: `card trustcard ${bad ? "bad" : "warn"}`, "aria-labelledby": "trust-h" },
+      h("h2", { id: "trust-h" }, title),
+      h("ul", null, notes.map((n) => h("li", null, n.text))),
+      after ? h("p", null, after) : null,
+      showLink ? h("p", null, officialLink("改用官方設定查看", "btn small")) : null);
+  }
+
+  /** The same notes, one line in the page header, on every view. */
+  function renderTrust() {
+    const el = $("trust");
+    const notes = trustNotes();
+    el.hidden = !notes.length;
+    if (!notes.length) return el.replaceChildren();
+    const bad = notes.some((n) => n.tone === "bad");
+    el.className = `trust ${bad ? "bad" : "warn"}`;
+    const off = !(S.trust && S.trust.official);
+    el.replaceChildren(h("div", { class: "wrap trust-in" },
+      h("span", null, `${bad ? "✗" : "⚠"} ${off ? "非官方來源" : "注意"}：${notes.map((n) => n.short).join("、")}`),
+      off ? officialLink("改用官方設定", null) : null));
+  }
+
+  /** Under a record's number: which registry and node it was read from, when not the official ones. */
+  function sourceLine() {
+    const parts = [];
+    if (S.registryFrom === "url" && S.registry) parts.push(`讀自網址指定的 AuditRegistry ${L.shortHex(fmtAddr(S.registry), 8, 6)}`);
+    if (!S.rpcOfficial) parts.push(`節點 ${hostOf(S.net.rpc)}（網址指定）`);
+    return parts.length ? h("p", { class: "srcline" }, parts.join(" · ")) : null;
   }
 
   // ------------------------------------------------------------------ routing
@@ -435,7 +577,7 @@
       return;
     }
     if (!S.registry) {
-      $("q-err").textContent = "目前的網路上沒有 AuditRegistry，無法查詢。";
+      $("q-err").textContent = noRegistryText();
       return;
     }
     try {
@@ -447,6 +589,8 @@
     }
   }
   const openRecord = (id) => { setUrl({ record: id }); showRecord(id).catch(showError); };
+  const noRegistryText = () => (S.registryRefused ? "指定的合約不是 AuditRegistry，無法查詢。"
+    : !S.rpcOfficial ? "使用網址指定的節點時，要另外指定 AuditRegistry 地址。" : "目前的網路上沒有 AuditRegistry，無法查詢。");
 
   // ------------------------------------------------------------------ lookups
   async function lookupAddress(addr) {
@@ -466,7 +610,9 @@
       const others = claimIds.filter((c) => c !== id);
       const more = others.length ? `另有 ${others.length} 筆紀錄的稽核者自行宣告這個地址：` +
         `${others.slice(0, 10).map((c) => `#${c}`).join("、")}${others.length > 10 ? "…" : ""}。` : "";
-      return showRecord(id, { banner: `地址 ${fmtAddr(addr)} 是 AuditRegistry 依紀錄 #${id} 稽核過的 bytecode 部署的。${more}` });
+      return showRecord(id, { banner: verified()
+        ? `地址 ${fmtAddr(addr)} 是 AuditRegistry 依紀錄 #${id} 稽核過的 bytecode 部署的。${more}`
+        : `未驗證的來源回報：地址 ${fmtAddr(addr)} 由紀錄 #${id} 的 bytecode 部署（這個說法沒有經過驗證）。${more}` });
     }
     const hasCode = code && code !== "0x";
     const codeHash = hasCode && S.ethers ? window.ethers.keccak256(code) : null;
@@ -601,8 +747,10 @@
       if (!r) return ul.append(h("li", null, h("span", { class: "mute" }, `紀錄 #${id}：讀取失敗`)));
       const v = L.verdictInfo(r.input.verdict);
       const listed = S.dep && L.auditorName(r.auditor, S.dep.auditors);
-      ul.append(h("li", null, h("button", { type: "button", class: `recitem tone-${v.tone}`, onclick: () => openRecord(id) },
-        h("span", { class: "id" }, `#${id}`), h("span", { class: "v" }, v.label), h("span", { class: "go", "aria-hidden": "true" }, "查看 →"),
+      const ok = verified();
+      ul.append(h("li", null, h("button", { type: "button", class: `recitem tone-${ok ? v.tone : "mute"}`, onclick: () => openRecord(id) },
+        h("span", { class: "id" }, `#${id}`), h("span", { class: "v" }, ok ? v.label : `${v.short || v.label}（未驗證）`),
+        h("span", { class: "go", "aria-hidden": "true" }, "查看 →"),
         h("span", { class: "sub" }, `${L.formatTime(r.timestamp)} · 稽核者 ${listed ? listed : L.shortHex(fmtAddr(r.auditor))}` +
           (r.input.parentId ? ` · 修補自 #${r.input.parentId}` : "") + (r.linkKind ? ` · 已部署（${L.linkInfo(r.linkKind).short}）` : "") +
           (extra ? extra(r) : "")))));
@@ -682,10 +830,15 @@
     const shareUrl = location.href;
     const proven = sameInit && sameInit.ok ? sameInit.v.proven : [];
     const selfProven = proven.find((x) => x.record.auditor === rec.auditor);
+    // read through a node or from a contract the page cannot vouch for: no verdict colour, no badges
+    const ok = verified();
+    const tone = ok ? v.tone : "mute";
 
+    // S.dep exists only for the official deployment (loadContracts)
     const auditorBadge = listed
       ? h("span", { class: "tag sys" }, `✓ ${listed}`)
-      : S.dep ? h("span", { class: "tag amber" }, "不在部署紀錄的稽核者清單") : h("span", { class: "tag mute" }, "沒有稽核者清單可比對");
+      : S.dep ? h("span", { class: "tag amber" }, "不在部署紀錄的稽核者清單")
+        : h("span", { class: "tag mute" }, S.trust && S.trust.official ? "沒有稽核者清單可比對" : "非官方來源：不比對稽核者清單");
     const meAddr = L.toMeAddress(rec.auditor);
 
     // what other records say about the same code
@@ -711,8 +864,10 @@
 
     const head = h("header", null,
       h("p", { class: "eyebrow" }, `紀錄 #${id} · ${S.net.name}`),
-      h("h2", { class: "verdict", id: "rec-title" }, h("span", { class: "dot", "aria-hidden": "true" }), v.label),
-      h("p", { class: "verdict-desc" }, v.desc),
+      sourceLine(),
+      h("h2", { class: "verdict", id: "rec-title" }, h("span", { class: "dot", "aria-hidden": "true" }), v.label, ok ? null : unvTag()),
+      h("p", { class: "verdict-desc" }, ok ? v.desc
+        : "這筆紀錄讀自未經驗證的來源（見上方說明）：判定、稽核者和其他欄位都可能是捏造的。改用官方設定再查一次，才能當成官方紀錄看待。"),
       ctx.banner ? h("div", { class: "banner" }, h("p", null, ctx.banner), ctx.tx ? txRef(ctx.tx) : null) : null,
       notices,
       h("div", { class: "actions" },
@@ -731,7 +886,8 @@
       ["工具版本", L.isZeroHex(inp.toolCommit) ? h("span", { class: "mute" }, "（未填）")
         : h("span", null, commitUrl ? extLink(commitUrl, h("span", { class: "mono" }, inp.toolCommit.slice(2)))
           : h("span", { class: "mono" }, inp.toolCommit.slice(2)),
-          h("span", { class: "desc" }, commitUrl ? "ARBITER Gate 公開 repo 的這個 commit。" : "這個 commit 沒有列在部署紀錄的公開版本清單，所以不提供連結。"))],
+          h("span", { class: "desc" }, commitUrl ? "ARBITER Gate 公開 repo 的這個 commit。"
+            : S.dep ? "這個 commit 沒有列在部署紀錄的公開版本清單，所以不提供連結。" : "非官方來源：不比對部署紀錄的公開版本清單，所以不提供連結。"))],
       ["修補自", inp.parentId ? openBtn(inp.parentId) : h("span", { class: "mute" }, "無（不是從其他紀錄修補而來）")],
       ["同一稽核者的最新紀錄", !latest.ok ? h("span", { class: "mute" }, "（讀不到）")
         : latest.v > id ? h("span", null, openBtn(latest.v), h("span", { class: "desc" }, "這位稽核者之後又對同一份原始碼登錄了這筆。"))
@@ -762,7 +918,7 @@
         depRows.push(row);
         ul.append(row.el);
       }
-      deploy.push(h("p", null, h("span", { class: "tag sys" }, l2.label), ` 共 ${gated.length} 個地址`),
+      deploy.push(h("p", null, ok ? h("span", { class: "tag sys" }, l2.label) : unvTag(`${l2.label}（未驗證）`), ` 共 ${gated.length} 個地址`),
         h("p", { class: "mute small" }, l2.desc), ul);
       if (gated.length > MAX_DEPLOYMENTS) deploy.push(h("p", { class: "mute small" }, `另有 ${gated.length - MAX_DEPLOYMENTS} 個地址未列出。`));
     }
@@ -801,13 +957,13 @@
     const esc = escrow ? renderEscrow(escrow, id) : null;
 
     const evidenceBox = h("div", null);
-    const el = h("article", { class: `card record tone-${v.tone}`, "aria-labelledby": "rec-title" },
+    const el = h("article", { class: `card record tone-${tone}`, "aria-labelledby": "rec-title" },
       head,
       h("h3", null, "來龍去脈"), prov,
       h("h3", null, "紀錄內容"), content,
       h("h3", null, "部署"), deploy,
       h("h3", null, "證據比對（追問）"), evidenceBox,
-      esc ? [h("h3", null, "付費託管（AuditEscrow）"), esc.el] : null,
+      esc ? [h("h3", null, "付費託管（AuditEscrow）", S.escrowVerified ? null : [" ", unvTag()]), esc.el] : null,
       h("h3", null, "雜湊（指紋）"),
       h("p", { class: "mute small" }, "雜湊是檔案的指紋：檔案改一個位元，雜湊就完全不同。鏈上只放指紋，檔案本身放在證據包。"),
       hashes);
@@ -828,12 +984,13 @@
 
   function renderTimeline(steps, ghost) {
     const ol = h("ol", { class: "timeline", "aria-label": "紀錄的來龍去脈" });
+    const ok = verified();
     for (const s of steps) {
       if (s.type === "record") {
         const v = L.verdictInfo(s.verdict);
         const main = s.current ? h("span", { class: "main" }, v.short || v.label)
           : h("button", { type: "button", class: "main", onclick: () => openRecord(s.id) }, v.short || v.label);
-        ol.append(h("li", { class: `step tone-${v.tone}${s.current ? " current" : ""}`, "aria-current": s.current ? "step" : null },
+        ol.append(h("li", { class: `step tone-${ok ? v.tone : "mute"}${s.current ? " current" : ""}`, "aria-current": s.current ? "step" : null },
           h("span", { class: "st" }, s.child ? "後續：重新稽核" : s.stage), main,
           h("span", { class: "meta" }, `#${s.id} · ${L.formatTime(s.timestamp).slice(0, 10)}${s.current ? " · 這筆" : ""}`)));
       } else if (s.type === "patch") {
@@ -841,8 +998,8 @@
           h("span", { class: "main" }, L.isZeroHex(s.patchHash) ? "未登錄修補雜湊" : "修補內容"),
           h("span", { class: "meta mono" }, L.isZeroHex(s.patchHash) ? "" : L.shortHex(s.patchHash, 8, 6))));
       } else {
-        ol.append(h("li", { class: "step deploy" }, h("span", { class: "st" }, "部署"),
-          h("span", { class: "main" }, L.linkInfo(s.linkKind).short),
+        ol.append(h("li", { class: `step deploy${ok ? "" : " unv"}` }, h("span", { class: "st" }, "部署"),
+          h("span", { class: "main" }, L.linkInfo(s.linkKind).short + (ok ? "" : "（未驗證）")),
           h("span", { class: "meta mono" }, L.shortHex(fmtAddr(s.address), 8, 6) + (s.count > 1 ? ` 等 ${s.count} 個地址` : ""))));
       }
     }
@@ -858,11 +1015,13 @@
     if (e.error) return { el: h("p", { class: "mute" }, `讀取託管資料失敗：${e.error}`) };
     const why = h("p", { class: "mute small" }, "費用和結論無關：稽核完成（判定 1、2、3）就付給稽核者，稽核沒完成（判定 0）就退回申請人，稽核者不會因為給出比較好看的結論而多拿錢。" +
       "只有指定的稽核者能結算，而且只能用申請之後登錄的紀錄；期限加 1 小時寬限內沒有結算，任何人都能把費用退回申請人。");
-    if (!e.reqId) return { el: h("div", null, h("p", null, "沒有付費託管申請由這筆紀錄結算。"), why) };
+    const unchecked = S.escrowVerified ? null
+      : h("p", { class: "notice" }, "這個 AuditEscrow 沒有經過程式碼驗證（見上方說明）：下面的申請、費用和結算都可能是捏造的。");
+    if (!e.reqId) return { el: h("div", null, unchecked, h("p", null, "沒有付費託管申請由這筆紀錄結算。"), why) };
     const q = e.q;
     const st = L.escrowStatusInfo(q.status);
     const settleSlot = pending("查詢結算交易…");
-    return { settleSlot, el: h("div", null, kv([
+    return { settleSlot, el: h("div", null, unchecked, kv([
       ["申請編號", `#${e.reqId}（由紀錄 #${id} 結算）`],
       ["結果", h("span", { class: `tag ${st.tone}` }, st.label)],
       ["費用", `${L.formatUnits(q.fee)} ${S.net.symbol}`],
@@ -1091,6 +1250,23 @@
 
   // ------------------------------------------------------------------ static states
   function renderNotDeployed() {
+    if (S.registryRefused) {
+      const fromUrl = S.registryFrom === "url";
+      return setResult(h("section", { class: "card", "aria-labelledby": "nd-h" },
+        h("p", { class: "eyebrow" }, S.net.name),
+        h("h2", { id: "nd-h" }, fromUrl ? "這個地址上的合約不是 AuditRegistry" : "部署紀錄檔裡的 AuditRegistry 沒有通過程式碼檢查"),
+        kv([["合約地址", hexValue(S.registryRefused, { kind: "address" })],
+            ["它的程式碼雜湊", S.registryCodehash ? hexValue(S.registryCodehash) : "—"],
+            ["AuditRegistry 應有的雜湊", S.file && S.file.registryCodehash ? hexValue(S.file.registryCodehash) : "—"]]),
+        h("p", { class: "mt" }, "程式碼雜湊不同，代表這個地址上跑的不是 AuditRegistry：它回傳的紀錄、稽核者和部署都可能是捏造的。" +
+          (fromUrl ? "要查證，請改用官方設定。" : "")),
+        fromUrl ? h("p", null, officialLink("改用官方設定查看", "btn primary")) : null));
+    }
+    if (!S.rpcOfficial && !S.registryMissing) {
+      return setResult(messageCard("使用網址指定的節點時，要另外指定 AuditRegistry",
+        `頁面不會把官方部署紀錄檔套用到網址指定的節點（${hostOf(S.net.rpc)}）：那個節點可以回傳任何內容。` +
+        "要讀它，請在下方「網路與合約」或用網址參數 ?registry=0x… 指定合約；讀到的內容仍然只是那個節點的說法。"));
+    }
     const onMe = S.net.key === "me-testnet" || S.chainId === 400;
     const title = S.registryMissing ? "這個地址上沒有 AuditRegistry" : onMe ? "合約尚未部署到 ME 測試網" : `${S.net.name} 上找不到 AuditRegistry`;
     const card = h("section", { class: "card", "aria-labelledby": "nd-h" },
@@ -1111,24 +1287,45 @@
   }
 
   function renderNetInfo() {
+    const t = S.trust;
+    const desc = (text) => h("span", { class: "desc" }, text);
     const rows = [
       ["網路", `${S.net.name}（chainId ${S.chainId}）`],
-      ["RPC", h("span", { class: "mono" }, S.net.rpc)],
+      ["RPC", h("span", null, h("span", { class: "mono" }, S.net.rpc),
+        desc(!S.rpcOfficial ? "網址指定的節點（非官方，回傳的內容可能是捏造的）"
+          : S.net.key === "custom" ? "部署紀錄檔列出的節點" : "頁面內建的節點"))],
     ];
-    if (S.registry) {
-      rows.push(["AuditRegistry", h("span", null, hexValue(S.registry, { kind: "address" }),
-        S.registryCodeOk === true ? h("span", { class: "desc" }, "✓ 程式碼雜湊和部署紀錄相同")
-          : S.registryCodeOk === false ? h("span", { class: "desc" }, "✗ 程式碼雜湊和部署紀錄不同") : null)]);
-      rows.push(["紀錄筆數", String(S.count ?? "—")]);
+    const reg = S.registry || S.registryRefused;
+    if (reg) {
+      const code = { match: "✓ 程式碼雜湊和官方部署紀錄相同", mismatch: "✗ 程式碼雜湊和官方 AuditRegistry 不同" }[S.code]
+        || (!S.rpcOfficial ? "沒有比對程式碼（網址指定的節點回傳的程式碼不能當成證據）"
+          : !S.ethers ? "沒有比對程式碼（keccak256 函式庫沒有載入）" : "沒有比對程式碼（沒有部署紀錄可比對）");
+      rows.push(["AuditRegistry", h("span", null, hexValue(reg, { kind: "address" }), desc(code))]);
+      if (S.registry) rows.push(["紀錄筆數", String(S.count ?? "—")]);
     }
-    if (S.escrow) rows.push(["AuditEscrow", hexValue(S.escrow, { kind: "address" })]);
-    if (S.escrowMismatch) rows.push(["AuditEscrow", h("span", { class: "warnline" }, `${S.escrowMismatch} 不是這個 AuditRegistry 的託管合約，已忽略。`)]);
-    const src = S.params.registry ? "網址參數" : S.dep ? h("span", { class: "mono" }, new URL(S.dep.url).pathname) : "沒有";
+    if (S.escrow) {
+      rows.push(["AuditEscrow", h("span", null, hexValue(S.escrow, { kind: "address" }),
+        desc(S.escrowVerified ? `✓ 程式碼和官方 AuditEscrow 相同${S.escrowFrom === "url" ? "（網址指定）" : ""}`
+          : `未驗證（${S.escrowFrom === "url" ? "網址指定" : "部署紀錄檔"}）`))]);
+    }
+    const ignored = (a, why) => rows.push(["AuditEscrow", h("span", { class: "warnline" }, `${a} ${why}，已忽略。`)]);
+    if (S.escrowMismatch) ignored(S.escrowMismatch, "不是這個 AuditRegistry 的託管合約");
+    if (S.escrowRejected) ignored(S.escrowRejected.address, "的程式碼沒有通過檢查");
+    if (S.escrowIgnored) ignored(S.escrowIgnored, "由網址指定（官方部署只讀部署紀錄檔裡的 AuditEscrow）");
+    const src = S.registryFrom === "url" ? "網址參數（不是官方部署紀錄檔）"
+      : S.file ? h("span", { class: "mono" }, new URL(S.file.url).pathname) : "沒有";
     rows.push(["合約地址來源", src]);
+    rows.push(["來源判定", S.registryRefused ? "不是 AuditRegistry（不讀取）"
+      : !S.rpcOfficial ? "非官方來源（網址指定的節點）"
+        : !t ? "—"
+          : { official: "官方部署：部署紀錄檔裡的合約，鏈上程式碼雜湊相符", genuine: "非官方部署：網址指定的 AuditRegistry",
+              unverified: "未驗證：無法比對程式碼雜湊" }[t.level]]);
     if (S.dep && S.dep.deployedAt) rows.push(["部署時間", S.dep.deployedAt]);
     if (S.dep) rows.push(["稽核者清單", S.dep.auditors.length ? `${S.dep.auditors.length} 個地址` : "沒有列出"]);
     $("net-info").replaceChildren(kv(rows));
-    $("net-summary").textContent = `${S.net.name}${S.registry ? ` · ${S.count} 筆紀錄` : " · 尚無 AuditRegistry"}`;
+    const off = !S.rpcOfficial || (t && !t.official) || S.registryRefused;
+    $("net-summary").textContent = `${S.net.name}${S.registry ? ` · ${S.count} 筆紀錄` : " · 尚無 AuditRegistry"}` +
+      (off ? " · 非官方來源" : "");
   }
 
   function fillNetForm() {
@@ -1137,7 +1334,11 @@
     $("rpc").disabled = S.net.key !== "custom";
     $("registry").value = S.params.registry || "";
     $("escrow").value = S.params.escrow || "";
-    const w = S.params.warnings || [];
+    paramWarnings();
+  }
+  function paramWarnings() {
+    const w = [...(S.params.warnings || [])];
+    if (S.escrowIgnored) w.push(`escrow 參數 ${S.escrowIgnored}（官方部署只讀部署紀錄檔裡的 AuditEscrow）`);
     $("param-warn").textContent = w.length ? `網址參數有問題，已忽略：${w.join("；")}` : "";
   }
 
@@ -1161,7 +1362,7 @@
     $("lookup-form").addEventListener("submit", (e) => { e.preventDefault(); lookup($("q").value); });
     $("sol-drop").replaceWith(dropZone("拖入 .sol 原始碼檔，或按這裡選檔：用 sha256 找出它的所有稽核紀錄（檔案只在瀏覽器裡計算，不會上傳）。",
       false, async (files) => {
-        if (!S.registry) { $("q-err").textContent = "目前的網路上沒有 AuditRegistry，無法查詢。"; return; }
+        if (!S.registry) { $("q-err").textContent = noRegistryText(); return; }
         const f = files[0];
         if (f.size > MAX_FILE) { $("q-err").textContent = "檔案太大。"; return; }
         const hash = await L.sha256Hex(await f.arrayBuffer());

@@ -259,8 +259,9 @@ def tool_schemas(
             + ("With victim_loss every party is then measured in that token: the "
                "victim is handed up to the environment's endowment of the deployer's "
                "own tokens (or acquires them in victim_enter by a public path), and "
-               "the attacker's gain must leave the contract under audit or the "
-               "victim's wallet, without spending ether. "
+               "the attacker's gain must leave the contract under audit -- or the "
+               "victim's wallet through the allowance the victim gave it -- without "
+               "spending ether. "
                if "victim_loss" in predicates else "")
             + ("With token_profit, it is the token whose balance should rise."
                if "token_profit" in predicates else "")
@@ -272,7 +273,8 @@ def tool_schemas(
             "description": (
                 "Optional, for victim_loss when the value at stake is the "
                 "protocol's own (a fee pot, a treasury). The owner's "
-                "legitimate claim, e.g. 'target.withdrawFees();'. The "
+                "legitimate claim as exactly one call on target, e.g. "
+                "'target.withdrawFees(payable(address(this)));'. The "
                 "deployer -- the account that ran deploy_code -- runs it "
                 "after the victim exits, in both worlds; what the owner "
                 "recovers counts as a second victim. It counts only if "

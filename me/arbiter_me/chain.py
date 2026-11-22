@@ -11,13 +11,16 @@ So 1 MEC = 10^18 of the EVM's smallest unit, the same 18 decimals as ether ("wei
 """
 from __future__ import annotations
 
+import atexit
 import dataclasses
 import getpass
 import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -31,6 +34,9 @@ from .bech32 import to_me1
 
 MEC_DECIMALS = 18
 ZERO32 = "0x" + "00" * 32
+# ME's node refuses eth_getLogs over more than 10,000 blocks ("maximum [from, to] blocks
+# distance: 10000"), so every log query covers at most LOG_WINDOW blocks.
+LOG_WINDOW = 10_000
 
 
 class ChainError(RuntimeError):
@@ -263,6 +269,39 @@ class Client:
         return self.rpc("eth_getLogs", [{"address": address, "topics": topics,
                                          "fromBlock": tag(from_block), "toBlock": tag(to_block)}]) or []
 
+    def block_at_timestamp(self, ts: int, lo: int = 0, hi: int | None = None) -> int:
+        """First block in [lo, hi] whose timestamp is >= ts (hi when none is), by binary search
+        over eth_getBlockByNumber. Block timestamps never decrease, so this is where a
+        transaction mined at time `ts` can first appear."""
+        hi = self.block_number() if hi is None else hi
+        lo = max(0, min(lo, hi))
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if self.block_timestamp(mid) < ts:
+                lo = mid + 1
+            else:
+                hi = mid
+        return lo
+
+    def find_logs(self, address: str, topics: list, start: int, end: int | None = None, *,
+                  window: int = LOG_WINDOW, max_windows: int = 100, first: bool = True) -> list[dict]:
+        """eth_getLogs from block `start` forward in windows of at most `window` blocks (ME's
+        cap), stopping at the first window with a match when `first`. At most `max_windows`
+        windows are read; a log further away is reported as not found."""
+        end = self.block_number() if end is None else end
+        window = max(1, min(window, LOG_WINDOW))
+        out: list[dict] = []
+        lo = max(0, start)
+        for _ in range(max_windows):
+            if lo > end:
+                break
+            hi = min(lo + window - 1, end)
+            out += self.get_logs(address, topics, lo, hi)
+            if out and first:
+                break
+            lo = hi + 1
+        return out
+
     def check_network(self) -> None:
         got = self.chain_id()
         if got != self.network.chain_id:
@@ -390,16 +429,84 @@ class DevKeySigner(Signer):
         return ["--private-key", self._key]
 
 
+# Password files of the open KeystoreSigners (file -> its private directory). They are removed
+# by close(), at interpreter exit (atexit), and when the process is told to stop (SIGTERM,
+# SIGHUP when the terminal closes, SIGINT): a signal that ends the process skips `finally`
+# blocks and __del__, which used to leave the keystore password on disk.
+_PW_FILES: dict[str, str] = {}
+_PREV_HANDLERS: dict[int, object] = {}
+_cleanup_lock = threading.Lock()
+_cleanup_ready = False
+
+
+def _remove_pw(pwfile: str, directory: str | None) -> None:
+    try:
+        os.remove(pwfile)
+    except OSError:
+        pass
+    if directory:
+        try:
+            os.rmdir(directory)
+        except OSError:
+            pass
+
+
+def _cleanup_pw_files() -> None:
+    while _PW_FILES:
+        try:
+            pwfile, directory = _PW_FILES.popitem()
+        except KeyError:
+            break
+        _remove_pw(pwfile, directory)
+
+
+def _on_stop_signal(signum, frame) -> None:
+    _cleanup_pw_files()
+    prev = _PREV_HANDLERS.get(signum)
+    if callable(prev):
+        prev(signum, frame)  # Python's own SIGINT handler raises KeyboardInterrupt
+        return
+    # The default action would end the process; end it the same way, but through
+    # SystemExit so `finally` blocks and atexit run too.
+    raise SystemExit(128 + signum)
+
+
+def _install_pw_cleanup() -> None:
+    global _cleanup_ready
+    with _cleanup_lock:
+        if _cleanup_ready:
+            return
+        _cleanup_ready = True
+    atexit.register(_cleanup_pw_files)
+    if threading.current_thread() is not threading.main_thread():
+        return  # signal handlers can only be set from the main thread; atexit still applies
+    for name in ("SIGTERM", "SIGHUP", "SIGINT"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            prev = signal.getsignal(sig)
+            if prev == signal.SIG_IGN or prev is None:
+                continue  # ignored on purpose (nohup): the process keeps running, keep the file
+            _PREV_HANDLERS[sig] = prev if callable(prev) else None
+            signal.signal(sig, _on_stop_signal)
+        except (ValueError, OSError):
+            continue
+
+
 class KeystoreSigner(Signer):
     """A Foundry keystore (~/.foundry/keystores/<name>). The password is typed once, kept in a
-    private temporary file for the lifetime of this object, and removed by close()."""
+    private temporary file for the lifetime of this object, and removed by close(), at exit,
+    or when the process is stopped by SIGTERM / SIGHUP / SIGINT."""
 
     def __init__(self, account: str, address: str | None = None, prompt: str | None = None):
         self.account = account
+        pw = getpass.getpass(prompt or f"keystore '{account}' 的密碼（輸入時不會顯示）: ")
+        _install_pw_cleanup()
         self._dir = tempfile.mkdtemp(prefix="arbiter-me-")
         os.chmod(self._dir, 0o700)
         self._pwfile = os.path.join(self._dir, "pw")
-        pw = getpass.getpass(prompt or f"keystore '{account}' 的密碼（輸入時不會顯示）: ")
+        _PW_FILES[self._pwfile] = self._dir  # registered before the password is written
         fd = os.open(self._pwfile, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w") as f:
             f.write(pw)
@@ -415,14 +522,11 @@ class KeystoreSigner(Signer):
         return ["--account", self.account, "--password-file", self._pwfile]
 
     def close(self) -> None:
-        try:
-            os.remove(self._pwfile)
-        except FileNotFoundError:
-            pass
-        try:
-            os.rmdir(self._dir)
-        except OSError:
-            pass
+        pwfile, directory = getattr(self, "_pwfile", None), getattr(self, "_dir", None)
+        if not pwfile:
+            return
+        _PW_FILES.pop(pwfile, None)
+        _remove_pw(pwfile, directory)
 
     def __del__(self):  # pragma: no cover - best effort
         self.close()

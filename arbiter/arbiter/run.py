@@ -467,12 +467,14 @@ def run_strict_retry(
 ) -> tuple[AgentOutcome, dict[str, Any]]:
     """One strict-only audit after a loose proof. Returns (outcome to record, record).
 
-    Success means a passed, adjudicated strict PoC. Its outcome then lists the retry's
-    PoCs FIRST, so everything that takes the first admissible PoC (patch.exploit_from_row,
-    report_arm.winning_predicate) takes the strict one, and its findings cite it: the
-    retry's own findings, or -- when the strict PoC passed but the model did not submit
-    -- the loose finding re-pointed at it. Anything else keeps the loose outcome, with
-    the retry's failed PoCs appended after it so every attempt stays on record.
+    Success means a passed, adjudicated strict PoC: the one a retry finding cites, else
+    the first victim_loss (measurable and patchable), else the first liveness_broken. Its
+    outcome then lists that PoC FIRST, the retry's other PoCs after it and the loose
+    outcome's last, so everything that takes the first admissible PoC
+    (patch.exploit_from_row, report_arm.winning_predicate) takes it, and its findings cite
+    it: the retry's own findings, or -- only when the retry submitted no finding at all --
+    the loose finding re-pointed at it ("carried"). Anything else keeps the loose outcome,
+    with the retry's failed PoCs appended after it so every attempt stays on record.
     """
     loose = loose_proof(outcome)
     rec: dict[str, Any] = {
@@ -506,13 +508,14 @@ def run_strict_retry(
     merged = outcome
     if retry is not None:
         rec["turns"] = retry.turns
-        strict = next((p for p in retry.pocs if p.passed and p.adjudicated
-                       and p.predicate in STRICT_PREDICATES), None)
+        strict = _strict_proof(retry)
         refusals = dict(outcome.refusals)
         for gate, n in retry.refusals.items():
             refusals[gate] = refusals.get(gate, 0) + n
         if strict is not None:
             findings = [f for f in retry.findings if f.get("poc_name") == strict.name]
+            # (_strict_proof takes a PoC a retry finding cites whenever there is one, so this
+            # is the case where the retry submitted nothing)
             carried = not findings
             if carried:
                 base = next((f for f in outcome.findings if f.get("poc_name") == loose.name),
@@ -521,7 +524,7 @@ def run_strict_retry(
                              "poc_hypothesis": strict.hypothesis}]
             merged = AgentOutcome(
                 verdict="vulnerable", findings=findings, safe_reason=None,
-                pocs=list(retry.pocs) + list(outcome.pocs),
+                pocs=[strict] + [p for p in retry.pocs if p is not strict] + list(outcome.pocs),
                 rejected_submissions=outcome.rejected_submissions + retry.rejected_submissions,
                 turns=outcome.turns, stop_reason=outcome.stop_reason, refusals=refusals)
             rec.update(status="proven", predicate=strict.predicate, poc_name=strict.name,
@@ -540,6 +543,21 @@ def run_strict_retry(
     rec["label"] = (STRICT_RETRY_PROVEN.get(rec["predicate"], STRICT_RETRY_LABELS["proven"])
                     if rec["status"] == "proven" else STRICT_RETRY_LABELS[rec["status"]])
     return merged, rec
+
+
+def _strict_proof(retry: AgentOutcome) -> PocRecord | None:
+    """The strict re-proof's PoC: a passed, adjudicated strict PoC a retry finding cites
+    (the first passed record of that name), else the first victim_loss -- the one A/B/G
+    and the patch can use -- else the first liveness_broken; None when none passed. It
+    used to be simply the first passed one, so a liveness proof run before the victim_loss
+    the model submitted displaced it (gate-logic-5)."""
+    passed = [p for p in retry.pocs if p.passed and p.adjudicated
+              and p.predicate in STRICT_PREDICATES]
+    for f in retry.findings:
+        hit = next((p for p in passed if p.name == f.get("poc_name")), None)
+        if hit is not None:
+            return hit
+    return min(passed, key=lambda p: STRICT_PREDICATES.index(p.predicate), default=None)
 
 
 def _strict_retry_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:

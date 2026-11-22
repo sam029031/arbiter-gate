@@ -39,6 +39,19 @@ Records (all marked as test data inside their gate.json):
   6  A, verdict 1 for the original DemoVault.sol (same bytecode A proved exploitable in record 1):
      deployAudited(6) reverts ContradictsProvenRecord, and record 1 has a newer record by A.
 
+Contracts a link can name instead of the deployment file's (fixture.json "spoof"; the page must
+never show them as the official deployment, web-security-wording-2..4):
+  otherRegistry/otherEscrow  a second genuine AuditRegistry + AuditEscrow pair (same code; the escrow
+                             bound to it). Its record 1 is by A, the auditor the deployment file
+                             lists, and settles an escrow request through otherEscrow.
+  fakeRegistry               AuditRegistry's own source with the record's auditor forced to A; its
+                             record 1 is sent by B but names A as the auditor.
+  fakeEscrow, fakeEscrowOther  answer registry() with the official (resp. the other) registry and
+                             settledBy(any) with a request of 500 coins from 0x…bEEF.
+  sim/me/web -> <repo>/me/web and sim/me/deployments/me-testnet.json: the same contracts declared as
+                             ME testnet (chainId 400, the official ME RPC), so a page served from
+                             /sim/me/web/verify/ sees what a spoofed ME node would get.
+
     python3 me/scripts/verify_page_fixture.py --vectors me/web/verify/test/vectors.json
 
 writes ABI test vectors encoded by `cast` for the page's decoder unit tests (no chain needed).
@@ -154,6 +167,25 @@ contract DemoCounter {
     function reset() external { require(tx.origin == owner, "owner"); count = 0; }
 }
 """
+
+# Spoof check: answers the calls the page makes to an AuditEscrow, but is not one.
+FAKE_ESCROW = """// SPDX-License-Identifier: MIT
+pragma solidity 0.8.24;
+
+// Test data for the ARBITER Gate verify page: looks like an AuditEscrow to a careless reader.
+contract FakeEscrow {
+    address public registry;
+    constructor(address r) { registry = r; }
+    function settledBy(uint256) external pure returns (uint256) { return 1; }
+    function getRequest(uint256) external view returns (address, address, bytes32, uint256, uint64, uint64,
+                                                       uint8, uint256, uint256) {
+        address who = address(uint160(0xbEEF));
+        return (who, who, bytes32(0), 500 ether, uint64(block.timestamp), uint64(block.timestamp + 3600), 2, 1, 1);
+    }
+}
+"""
+ME_RPC = "https://beta-hub-8545.explorer-testnet.me"
+ME_EXPLORER = "https://www.explorer-testnet.me"
 
 FOUNDRY_TOML = """[profile.default]
 src = "src"
@@ -400,6 +432,17 @@ def build_chain(args: argparse.Namespace) -> dict:
     if reg.latest_record(a.address, sha256_hex(VAULT)) != r6:
         raise ChainError("latestRecord(A, DemoVault.sol) is not record 6")
 
+    spoof = build_spoofs(client, signer_a, signer_b, registry, gate_base)
+    sim = root / "sim" / "me"
+    (sim / "deployments").mkdir(parents=True, exist_ok=True)
+    sim_web = sim / "web"
+    if sim_web.is_symlink() or sim_web.exists():
+        sim_web.unlink()
+    sim_web.symlink_to(REPO / "me" / "web", target_is_directory=True)
+    me_dep = {**dep, "network": "me-testnet", "chainId": 400, "rpc": ME_RPC, "explorer": ME_EXPLORER}
+    (sim / "deployments" / "me-testnet.json").write_text(json.dumps(me_dep, ensure_ascii=False, indent=2) + "\n")
+    spoof["simBase"] = "/sim/me/web/verify/"
+
     sources = root / "sources"
     sources.mkdir(exist_ok=True)
     for fname, text in (("DemoVault.sol", VAULT), ("DemoVault.patched.sol", VAULT_PATCHED),
@@ -420,9 +463,44 @@ def build_chain(args: argparse.Namespace) -> dict:
         "sourceHashes": {"DemoVault.sol": sha256_hex(VAULT), "DemoVault.patched.sol": sha256_hex(VAULT_PATCHED),
                          "DemoToken.sol": sha256_hex(TOKEN)},
         "logGap": args.log_gap,
+        "spoof": spoof,
     }
     (root / "fixture.json").write_text(json.dumps(out, indent=2) + "\n")
     return out
+
+
+def build_spoofs(client: Client, signer_a: DevKeySigner, signer_b: DevKeySigner, registry: str,
+                 gate_base: dict) -> dict:
+    """The contracts a crafted link can name in place of the deployment file's (module docstring)."""
+    a_addr = chain.cast("to-check-sum-address", signer_a.address)
+    word = lambda addr: "0" * 24 + addr[2:].lower()  # noqa: E731  (an address as a constructor argument)
+    gate = gate_json({**gate_base, "exit_code": 0,
+                      "files": [{"path": "DemoCounter.sol", "verdict": "no_provable_attack",
+                                 "label": "未發現可證明攻擊（不等於安全）", "findings": []}]})
+
+    other = signer_a.send(client, None, contracts.creation_code("AuditRegistry"))["contractAddress"]
+    other_escrow = signer_a.send(client, None, contracts.creation_code("AuditEscrow") + word(other))["contractAddress"]
+    oa = Fixture(client, signer_a, other, other_escrow)
+    ob = Fixture(client, signer_b, other, other_escrow)
+    oreq, _ = ob.request(COUNTER, a_addr)
+    orid, _ = oa.register(source=COUNTER, verdict=1, gate=gate, commit=PUBLIC_COMMIT)
+    oa.settle(oreq, orid)
+
+    source = (contracts.CONTRACTS_DIR / "src" / "AuditRegistry.sol").read_text()
+    if source.count("r.auditor = msg.sender;") != 1:
+        raise ChainError("AuditRegistry.sol changed: update the fake registry's patch")
+    fake_src = source.replace("r.auditor = msg.sender;", f"r.auditor = {a_addr};")
+    fake = signer_b.send(client, None, compile_initcode("AuditRegistry", fake_src))["contractAddress"]
+    frid, _ = Fixture(client, signer_b, fake, other_escrow).register(source=COUNTER, verdict=1, gate=gate,
+                                                                     commit=PUBLIC_COMMIT)
+    if contracts.Registry(client, fake).record(frid)["auditor"].lower() != signer_a.address.lower():
+        raise ChainError("the fake registry did not put A's address on B's record")
+
+    fake_escrow_init = compile_initcode("FakeEscrow", FAKE_ESCROW)
+    fake_escrow = signer_b.send(client, None, fake_escrow_init + word(registry))["contractAddress"]
+    fake_escrow_other = signer_b.send(client, None, fake_escrow_init + word(other))["contractAddress"]
+    return {"otherRegistry": other, "otherEscrow": other_escrow, "otherRecord": orid,
+            "fakeRegistry": fake, "fakeRecord": frid, "fakeEscrow": fake_escrow, "fakeEscrowOther": fake_escrow_other}
 
 
 # ---------------------------------------------------------------------------- serving

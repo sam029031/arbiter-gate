@@ -9,16 +9,36 @@
 
 - GitHub Pages／任何靜態主機：直接開 `…/me/web/verify/`。
 - 本機網頁介面：以 `/verify/` 提供這個資料夾（`/verify` 會自動補成 `/verify/`），並提供 `/me/deployments/<network>.json`。
-- 合約地址的來源，依序：網址參數 `?registry=0x…&escrow=0x…` → `../../deployments/<network>.json`（相對於頁面）→ `/me/deployments/<network>.json`。
-  `<network>` 是 `me-testnet` 或 `anvil`；自訂 RPC 依 chainId（400、31337）對應。
+- 部署紀錄檔依序找 `../../deployments/<network>.json`（相對於頁面）→ `/me/deployments/<network>.json`，只讀和頁面同一個網站上的檔案。
+  `<network>` 是 `me-testnet` 或 `anvil`；自訂 RPC 依它回報的 chainId（400、31337）對應。
+
+## 官方部署，和網址參數指定的東西
+
+頁面只替一件事背書，稱為**官方部署**，三個條件都要成立：
+
+1. **節點是那個網路自己的**：頁面內建的 RPC（ME 測試網是 `https://beta-hub-8545.explorer-testnet.me`），或部署紀錄檔 `rpc` 欄位寫的那一個。
+2. **AuditRegistry 是部署紀錄檔裡的那一個**（`?registry=` 寫的若就是它，也算）。
+3. **鏈上程式碼雜湊相符**：`eth_getCode` 讀到的程式碼算 keccak256（ethers），等於部署紀錄檔的 `registry.codehash`。
+
+只有官方部署才用部署紀錄檔的稽核者清單（「✓」）和公開版本清單（commit 連結）。其他情況：
+
+| 情況 | 頁面怎麼做 |
+|---|---|
+| `?rpc=` 指定的節點不是上面第 1 條的節點 | 不套用部署紀錄檔（也不用它的 AuditRegistry 地址，要用 `?registry=` 自己指定），網路名稱寫「自訂 RPC（chainId N）」；頁首和每個畫面都標「非官方來源」，判定和部署標「未驗證」。chainId 400 時，`cast receipt` 自我驗證指令一律指向 ME 官方 RPC，不指向連結裡的節點。 |
+| `?registry=` 指定另一個合約，程式碼雜湊和官方 AuditRegistry 相同 | 確實是 AuditRegistry（AuditRegistry 沒有 immutable，所有真的部署雜湊都一樣），照常顯示，但標「非官方部署」、不給「✓」：任何人都能自己部署一份。 |
+| 程式碼雜湊不同 | 不是 AuditRegistry，可能是仿冒的合約：頁面完全不讀它的資料，只顯示兩個雜湊和「改用官方設定查看」。 |
+| 無法比對（ethers 沒載入、沒有部署紀錄檔或沒有 `codehash`） | 不能當成官方部署：標「非官方來源」，判定和部署標「未驗證」。 |
+| `?escrow=` | 官方部署只讀部署紀錄檔裡的 AuditEscrow，網址指定的其他地址列在「網址參數有問題，已忽略」。和 `?registry=` 一起用時才讀：先確認 `registry()` 是那個 AuditRegistry；它若是經過驗證的 AuditRegistry，AuditEscrow 的程式碼也要相符（唯一的 immutable 是 registry，把它換回官方地址後，雜湊要等於部署紀錄檔的 `escrow.codehash`），不符就忽略；來源本身沒驗證時照讀，標「未驗證」。 |
+
+每個非官方畫面都有「改用官方設定查看」：同一個查詢，拿掉 `rpc`、`registry`、`escrow`。
 
 ## 網址參數
 
 | 參數 | 用途 |
 |---|---|
 | `net=me-testnet\|anvil\|custom` | 網路（預設 ME 測試網，chainId 400） |
-| `rpc=https://…` | 自訂 RPC（隱含 `net=custom`） |
-| `registry=0x…`、`escrow=0x…` | 指定合約地址 |
+| `rpc=https://…` | 自訂 RPC（隱含 `net=custom`；不是官方節點時標「非官方來源」） |
+| `registry=0x…`、`escrow=0x…` | 指定合約地址（見上一節：不是官方部署時一律標出來） |
 | `record=ID`、`address=0x…`（或 me1…）、`tx=0x…`、`source=0x<sha256>` | 直接打開查詢結果 |
 | `theme=dark\|light` | 指定配色（預設跟系統） |
 
@@ -41,20 +61,23 @@ ME 的區塊瀏覽器以 Cosmos 交易雜湊索引，不認 0x 雜湊。每筆�
 查出對應的 Cosmos 交易，連到 `https://www.explorer-testnet.me/zh-TW/transactions/<COSMOS_HASH>?netType=hub`（另附區塊連結）。
 查不到時改給自己驗證的指令：`cast receipt <0x雜湊> --rpc-url https://beta-hub-8545.explorer-testnet.me`。
 地址連到 `https://www.explorer-testnet.me/zh-TW/accountDetails/<me1…>`。本機 anvil 和自訂 RPC（chainId 不是 400）沒有瀏覽器連結。
+回報 chainId 400 的自訂 RPC 也有瀏覽器連結：連結是向 ME 自己的 Hub 查出來的，只會連到 ME 上真的交易；
+但那個節點說的「這筆交易屬於這筆紀錄」沒有經過驗證，所以畫面標「非官方來源」。
 
 紀錄的登錄、部署與結算交易用 `eth_getLogs` 找。ME 的節點一次最多查 10,000 個區塊；整段查詢被拒時，
 頁面依紀錄的區塊時間找出它所在的區塊，從那裡一段一段往後查（最多 8 段）。
 
 ## 部署紀錄檔的選用欄位
 
-`me/arbiter_me/contracts.py` 寫的 `me/deployments/<network>.json` 之外，頁面還讀兩個選用欄位：
+頁面用 `me/arbiter_me/contracts.py` 寫的 `me/deployments/<network>.json` 裡的 `chainId`、`rpc`、`registry`／`escrow` 的
+`address`、`codehash`、`block`；另外讀兩個選用欄位：
 
 ```json
 {"auditors": [{"address": "0x…", "name": "顯示名稱"}],
  "publicToolCommits": ["<40 位 commit sha>"]}
 ```
 
-- `auditors`：列出的稽核者地址在紀錄上顯示「✓ 名稱」；沒列出的顯示「不在部署紀錄的稽核者清單」。
+- `auditors`：只在官方部署上使用。列出的稽核者地址在紀錄上顯示「✓ 名稱」；沒列出的顯示「不在部署紀錄的稽核者清單」。
 - `publicToolCommits`：紀錄的 toolCommit 在這個清單裡，才連到 `github.com/sam029031/arbiter-gate/commit/<sha>`；否則只顯示文字。
 
 ## 證據包（evidenceURI）
@@ -102,4 +125,6 @@ node me/scripts/verify_page_browser_check.js --fixture /tmp/vp_root/fixture.json
 ```
 
 瀏覽器檢查只信任那張自簽憑證的公鑰（SPKI 雜湊），並在 anvil 前面放一個像 ME 一樣限制 `eth_getLogs` 範圍的代理，
-確認分段查詢找得到交易；`--no-me` 略過 ME 測試網的唯讀檢查（未部署狀態、Hub 的 Cosmos 交易對應）。
+確認分段查詢找得到交易；另外兩個代理扮演連結可能指定的節點（自稱 chainId 400 的節點、同一條鏈的另一個網址），
+配合 fixture 的仿冒合約（假 AuditRegistry、假 AuditEscrow、另一組真的 AuditRegistry／AuditEscrow、宣稱是 ME 測試網的部署紀錄檔），
+確認這些都不會被顯示成官方部署。`--no-me` 略過 ME 測試網的唯讀檢查（未部署狀態、Hub 的 Cosmos 交易對應）。

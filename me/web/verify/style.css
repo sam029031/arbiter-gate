@@ -217,3 +217,18 @@ div.notice p + p { margin-top: 4px; }
 .selfcheck { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .selfcheck code { background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
 @media (max-width: 640px) { .dep .kv { grid-template-columns: minmax(0, 1fr); } }
+
+/* not the official deployment: a line in the header, a card on every view, muted verdicts */
+.trust { border-top: 1px solid var(--line); font-size: .86rem; line-height: 1.5; padding: 6px 0; color: var(--ink); }
+.trust.warn { background: var(--amber-bg); border-top-color: var(--amber); }
+.trust.bad { background: var(--red-bg); border-top-color: var(--red); }
+.trust-in { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; }
+.trust-in span { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.trust.warn .trust-in span { color: var(--amber); } .trust.bad .trust-in span { color: var(--red); }
+.trustcard { border-left: 4px solid var(--amber); }
+.trustcard.bad { border-left-color: var(--red); }
+.trustcard h2 { color: var(--amber); } .trustcard.bad h2 { color: var(--red); }
+.trustcard ul { margin: 0 0 10px; padding-left: 1.2em; display: grid; gap: 6px; overflow-wrap: anywhere; }
+.srcline { margin: 0 0 6px !important; color: var(--amber); font-size: .86rem; overflow-wrap: anywhere; }
+.tag.unv { color: var(--amber); background: var(--amber-bg); }
+.step.unv { --tone: var(--mute); }

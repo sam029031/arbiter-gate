@@ -429,6 +429,8 @@
     return {
       network: typeof json.network === "string" ? json.network : "",
       chainId: Number.isSafeInteger(json.chainId) ? json.chainId : null,
+      // the node the contracts were deployed through (me/arbiter_me/contracts.py writes it)
+      rpc: typeof json.rpc === "string" && rpcUrlOk(json.rpc) ? json.rpc : null,
       registry: registry.toLowerCase(),
       escrow: isAddress(escrow) ? escrow.toLowerCase() : null,
       registryCodehash: json.registry && isBytes32(json.registry.codehash) ? json.registry.codehash.toLowerCase() : null,
@@ -444,6 +446,90 @@
     if (!isAddress(addr) || !Array.isArray(auditors)) return null;
     const hit = auditors.find((a) => a.address === addr.toLowerCase());
     return hit ? hit.name || "已列出的稽核者" : null;
+  }
+
+  // ------------------------------------------------------------------ official deployment or not
+  // The page vouches for one thing only: the deployment file's AuditRegistry, read through the
+  // network's own node, with the code on chain hashing to what the file recorded. A node, a
+  // registry or an escrow named in the URL is somebody else's say-so: the page still reads it,
+  // but never under the official network name, with the auditor list, or without a warning.
+
+  /** An RPC URL reduced to what identifies the node (scheme, host, port, path, query), or null. */
+  function rpcKey(url) {
+    if (!rpcUrlOk(url)) return null;
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, "")}${u.search}`;
+  }
+  const sameRpc = (a, b) => { const x = rpcKey(a); return x !== null && x === rpcKey(b); };
+
+  /**
+   * Which contracts the page reads and where each address came from. params: parseParams()
+   * output. file: parseDeployment() of the deployment file the page trusts for this node, or
+   * null (no file, or a node from the URL that the file does not name). A registry= equal to
+   * the file's registry is the file's. With the file's registry only the file's escrow is read
+   * (an escrow= naming another contract is ignored); escrow= counts only beside a registry=.
+   * -> {registry, registryFrom: "file"|"url"|null, escrow, escrowFrom: "file"|"url"|null, ignoredEscrow}
+   */
+  function chooseContracts(params, file) {
+    const p = params || {};
+    const fileRegistry = file && isAddress(file.registry) ? file.registry.toLowerCase() : null;
+    const want = (k) => (isAddress(p[k]) ? p[k].toLowerCase() : null);
+    const [registry, escrow] = [want("registry"), want("escrow")];
+    if (fileRegistry && (!registry || registry === fileRegistry)) {
+      const fileEscrow = isAddress(file.escrow) ? file.escrow.toLowerCase() : null;
+      return { registry: fileRegistry, registryFrom: "file", escrow: fileEscrow, escrowFrom: fileEscrow ? "file" : null,
+               ignoredEscrow: escrow && escrow !== fileEscrow ? escrow : null };
+    }
+    if (registry) return { registry, registryFrom: "url", escrow, escrowFrom: escrow ? "url" : null, ignoredEscrow: null };
+    return { registry: null, registryFrom: null, escrow: null, escrowFrom: null, ignoredEscrow: escrow };
+  }
+
+  /** keccak256 of the runtime code on chain against the hash the trusted deployment file
+   * recorded: "match", "mismatch", or "unchecked" (nothing to compare, or no keccak256). */
+  function codeCheck(actual, expected) {
+    if (!isBytes32(actual) || !isBytes32(expected) || isZeroHex(actual) || isZeroHex(expected)) return "unchecked";
+    return sameHash(actual, expected) ? "match" : "mismatch";
+  }
+
+  /**
+   * How far the page can vouch for what it shows.
+   *   official    the network's own node, the deployment file's registry, code hash matches the file
+   *   genuine     the network's own node and a registry from the URL whose code is AuditRegistry's:
+   *               a real AuditRegistry, but not the deployment the page vouches for
+   *   fake        the network's own node says the registry's code is not AuditRegistry's: nothing it
+   *               returns is read
+   *   unverified  anything else: a node from the URL (it can return any data at all, including the
+   *               real AuditRegistry code), or a code hash that could not be checked
+   * verified: records come from a real AuditRegistry through a node the page trusts.
+   */
+  function trustLevel({ rpcOfficial, registryFrom, code }) {
+    const level = !rpcOfficial ? "unverified"
+      : code === "mismatch" ? "fake"
+      : code !== "match" ? "unverified"
+      : registryFrom === "file" ? "official" : "genuine";
+    return { level, official: level === "official", verified: level === "official" || level === "genuine" };
+  }
+
+  /**
+   * AuditEscrow's only immutable is its registry, stored as a 32-byte word in the runtime code:
+   * the code of an escrow bound to `registry`, rewritten as if it were bound to `official`. A
+   * genuine AuditEscrow for any registry then hashes like the deployment file's escrow.
+   */
+  function rebindRegistry(code, registry, official) {
+    if (typeof code !== "string" || !/^0x[0-9a-fA-F]*$/.test(code) || !isAddress(registry) || !isAddress(official)) return null;
+    const word = (a) => "0".repeat(24) + strip0x(a).toLowerCase();
+    return "0x" + code.slice(2).toLowerCase().split(word(registry)).join(word(official));
+  }
+
+  /** Query string for the same lookup without the URL's node and contract choices, i.e. as the
+   * page's own settings for network `home` read it ("" when nothing is left). */
+  function officialSearch(params, home) {
+    const p = params || {};
+    const q = new URLSearchParams();
+    if (home && home !== "me-testnet" && NETWORK_KEYS.includes(home) && home !== "custom") q.set("net", home);
+    for (const k of ["record", "address", "tx", "source", "theme"]) if (p[k] != null && p[k] !== "") q.set(k, String(p[k]));
+    const s = q.toString();
+    return s ? `?${s}` : "";
   }
   const TOOL_REPO = "https://github.com/sam029031/arbiter-gate";
   /** Link a tool commit only when the deployment file says that commit is public. */
@@ -694,7 +780,8 @@
     encodeCall, decodeRecord, decodeRequest, decodeUintArray, decodeAddressArray, decodeNumber, decodeAddress,
     decodeBool, decodeLog,
     toMeAddress, fromMeAddress, classifyQuery, parseParams, rpcUrlOk,
-    parseDeployment, auditorName, commitLink, explorerUrl, cosmosTxSearchUrl, parseTxSearch, selfCheckCommand,
+    parseDeployment, auditorName, rpcKey, sameRpc, chooseContracts, codeCheck, trustLevel, rebindRegistry,
+    officialSearch, commitLink, explorerUrl, cosmosTxSearchUrl, parseTxSearch, selfCheckCommand,
     findBlockByTime, logWindows,
     evidenceLocation, safeRelPath, bundleFileUrl, guessRole, roleOf, manifestSchemaProblem, compareEvidence,
     matchFields, provenanceSteps, formatUnits, isoUtc, formatTime,

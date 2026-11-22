@@ -10,7 +10,9 @@
 `--file` audits live: a fresh run_id and workspace per job, never filtered by triage.
 A file with no imports is presented to the agent either hermetically (`--mode hermetic`,
 src/Target.sol) or as a one-file repository (`--mode repo`, the same user message
-`cli.py audit <file>` sends); A/B/G and patches run hermetically either way. `--from-results` replays a recorded run and sends
+`cli.py audit <file>` sends); A/B/G and patches run hermetically either way, except for a
+contract below solc 0.8 (admitted only in repo mode), which they build in its one-file
+repository because the hermetic workspace cannot. `--from-results` replays a recorded run and sends
 no LLM request at all; it is the finals demo's main path, and both write the same JSON.
 
 Verdicts come from arbiter/verdict.py and nowhere else, as does the exit code
@@ -85,7 +87,8 @@ from typing import Any
 
 from .dump import regression_unavailable_reason, write_regression
 from .repo import SKIP_DIRS
-from .patch import MAX_DEFENSES, TARGET_PATH, exploit_from_row, repair, reproduce, verify_fix
+from .patch import (HERMETIC_PRAGMA, MAX_DEFENSES, TARGET_PATH, exploit_from_row, repair,
+                    reproduce, verify_fix)
 from .tools import STRICT_PREDICATES
 from .units import WEI, format_amount, unit_name
 from . import progress, sandbox
@@ -419,7 +422,7 @@ def _finding_evidence(row: dict[str, Any], finding: dict[str, Any], *, work: Pat
         reason = "這份合約有 import；回歸測試下載目前只支援單一檔案的合約。"
     out["regression"] = ({"status": "available", "note": ""} if not reason else
                          {"status": "unavailable", "note": reason})
-    if repo:
+    if repo and not repo.get("single_file"):
         rt = base.get("repo_tests") or {}
         out["repo_tests_before"] = {"status": rt.get("status"), "reason": rt.get("reason"),
                                     "passed": len(rt.get("passed") or []),
@@ -516,8 +519,7 @@ def _timeline(rec: dict[str, Any], reattack_turns: int) -> dict[str, Any]:
         reattack["label"] = f"修補後再攻擊 1 次（{last.get('turns')} 回合）未成功"
     elif c5.get("status") == "not_diverse" and last:
         reattack["label"] = (f"修補後再攻擊 1 次（{last.get('turns')} 回合）未成功，但 "
-                             + ("AI 沒有換手法（同一手法換個寫法）" if last.get("attempts")
-                                else "AI 沒有寫出任何攻擊程式")
+                             + _NOT_NEW[_not_new(last.get("attempts"))][0]
                              + "，所以檢查 5 不算通過")
     elif c5.get("status") == "skipped":
         reattack["label"] = "修補後再攻擊沒有完成（不算通過）"
@@ -534,17 +536,37 @@ def _timeline(rec: dict[str, Any], reattack_turns: int) -> dict[str, Any]:
 _PROVEN_HOW = {"same": "同一手法換個寫法仍打穿修補", "new_entry": "同類手法換個入口打穿修補",
                "new_class": "換了手法打穿修補"}
 
+# Why a re-attack that found nothing did not count as a different technique (check 5
+# not_diverse): (gate.json label, timeline cell). Only a compiled exploit traced against
+# the patched contract can count as new (technique.fingerprint_attempts).
+_NOT_NEW = {
+    "none": ("AI 沒有寫出任何攻擊程式", "沒有寫出攻擊程式"),
+    "same": ("AI 沒有換手法（同一手法換個寫法）", "沒有換手法"),
+    "unrun": ("AI 沒有寫出能在修補後的合約上執行的新手法攻擊（沒有編譯成功、或軌跡無法比對的攻擊程式不算）",
+              "沒有能執行的新手法攻擊"),
+}
+
+
+def _not_new(attempts: list[dict[str, Any]] | None) -> str:
+    if not attempts:
+        return "none"
+    return "same" if all(a.get("novelty") == "same" for a in attempts) else "unrun"
+
 
 def _attack_label(e: dict[str, Any]) -> str:
     if e.get("source") == "audit":
         return "攻擊成功（已證實）"
     if e["result"] == "proven":
-        return f"再攻擊：成功（{_PROVEN_HOW.get(e.get('novelty'), '修補被打穿')}）"
+        how = _PROVEN_HOW.get(e.get("novelty"), "修補被打穿")
+        # An exploit the harness passed against the patch counts with or without a finding.
+        return (f"再攻擊：成功（{how}"
+                + ("；攻擊程式通過判定，AI 沒有提交發現" if e.get("finding_submitted") is False else "")
+                + "）")
     if e["result"] == "not_proven":
         if "attempts" not in e or e.get("novel"):   # (recordings from before the check)
             return f"換手法攻擊：未成功（{e.get('turns')} 回合）"
         return (f"再攻擊：未成功（{e.get('turns')} 回合），但"
-                + ("沒有換手法" if e["attempts"] else "沒有寫出攻擊程式") + "（不算通過）")
+                + _NOT_NEW[_not_new(e["attempts"])][1] + "（不算通過）")
     return "換手法攻擊：沒有完成（不算通過）"
 
 
@@ -636,6 +658,13 @@ def _hermetic_compile_error(code: str, job: Path,
     prepare_context, whose test pragma follows the contract's own -- so when this probe
     fails, that context is tried before refusing: a 0.7.6 contract the audit can build
     is no longer turned away before it starts. A contract that builds here is unaffected.
+
+    When that context does not build either, a contract below 0.8 is refused with ITS
+    diagnostic (the solc error, or which compiler is missing): this probe's own error only
+    says its >=0.8.0 test cannot sit next to the contract ("Found incompatible versions"),
+    which named a version mismatch for a version the sandbox supports and hid the real
+    error (sandbox-misc-4). At 0.8 or above this probe's diagnostic stands; it is the same
+    error, with its location.
     """
     ws = Workspace(job / "ctx", "context", code)
     try:
@@ -644,18 +673,24 @@ def _hermetic_compile_error(code: str, job: Path,
         ws.cleanup()
     if result.ok:
         return None
+    below_error = ""
     if item is not None and item.get("path"):
         from .repo import plan_for
         try:
             plan = plan_for(Path(item["path"]), repo_root=Path(item["repo_root"]))
             ws = Workspace(job / "ctx", "context", code, plan=plan)
             try:
-                if ws.prepare_context().get("ok"):
-                    return None
+                prep = ws.prepare_context()
             finally:
                 ws.cleanup()
+            if prep.get("ok"):
+                return None
+            if plan.test_pragma != HERMETIC_PRAGMA:
+                below_error = str(prep.get("error") or "")
         except Exception:  # noqa: BLE001 -- the hermetic error below still stands
             pass
+    if below_error:
+        return f"context_unbuildable: {_located(below_error, code, job)[:300]}"
     # A compiler the sandbox does not carry (and cannot download) is not the contract's
     # fault; say which version and what the sandbox has, not "Read-only file system".
     if missing := explain_pragma(code) or explain_missing(result.combined):
@@ -672,6 +707,33 @@ def _hermetic_compile_error(code: str, job: Path,
         loc = lines[at + 1] if at + 1 < len(lines) and lines[at + 1].startswith("-->") else ""
         first = f"{lines[at]} {loc}".strip()
     return f"context_unbuildable: {first[:300]}"
+
+
+_OLD_LOC_RE = re.compile(r"(\S+\.sol:\d+:\d+):")
+
+
+def _located(diagnostic: str, code: str, job: Path) -> str:
+    """A solc diagnostic from prepare_context (which keeps only its first line), with the
+    place it points to, as the >=0.8 refusal gives it: the contract built alone, with no
+    test beside it, prints the same error and -- below 0.8 in solc's old style, as
+    `src/Target.sol:5:62: TypeError: ...` -- where. Anything else is returned unchanged."""
+    if not re.match(r"Error \(\d+\)", diagnostic):
+        return diagnostic
+    ws = Workspace(job / "ctx", "located", code)
+    try:
+        lines = [ln.strip() for ln in ws.build().combined.splitlines() if ln.strip()]
+    except Exception:  # noqa: BLE001 -- the diagnostic alone still says what is wrong
+        return diagnostic
+    finally:
+        ws.cleanup()
+    at = next((i for i, ln in enumerate(lines) if ln.startswith(diagnostic)), None)
+    if at is None or at + 1 >= len(lines):
+        return diagnostic
+    nxt = lines[at + 1]
+    if nxt.startswith("-->"):
+        return f"{diagnostic} {nxt}"
+    m = _OLD_LOC_RE.match(nxt)
+    return f"{diagnostic} --> {m.group(1)}:" if m else diagnostic
 
 
 def _free_port() -> int:
@@ -1022,7 +1084,7 @@ def _run_gate(args: argparse.Namespace, log: Any = print,
     return {
         "schema": SCHEMA,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        **_tool_commit(),
+        **_tool_commit(replay=bool(args.from_results)),
         "input": input_desc,
         "models": models,
         "patches_file": args.patches,
@@ -1035,26 +1097,41 @@ def _run_gate(args: argparse.Namespace, log: Any = print,
     }
 
 
-def _tool_commit() -> dict[str, str]:
+def _tool_commit(replay: bool = False) -> dict[str, Any]:
     """Which ARBITER Gate code produced this report, so an on-chain record can name it.
 
-    ARBITER_TOOL_COMMIT wins (a published snapshot commit whose code tree equals this checkout,
-    which is what a reader can look up); otherwise the checkout's own HEAD, with "-dirty" when
-    tracked files differ from it. Nothing is written when git is unavailable."""
+    ARBITER_TOOL_COMMIT wins: whoever runs the gate states that this checkout's code tree
+    equals that commit (a published snapshot, which a reader can look up; the development
+    commits are private). Otherwise the checkout's own HEAD, with `tool_commit_dirty`: true
+    when tracked files differ from HEAD. HEAD is then only the nearest commit, NOT the code
+    that ran, and must not be presented as such -- an ME record should refuse it unless the
+    commit is named by hand (record.py --tool-commit). It used to be written bare, with the
+    "（有未提交的修改）" note alone in tool_commit_source, which nothing checks
+    (gate-logic-7).
+
+    `tool_commit_role` says what that code did: "audit" -- it ran the audit whose verdicts
+    and exploits this report holds -- or "replay" (--from-results): it only re-measured
+    and rendered a recorded run, whose verdicts and exploits came from the code that
+    recorded it, which this report cannot name. Nothing is written when git is
+    unavailable."""
+    role = {"tool_commit_role": "replay" if replay else "audit"}
     env = os.environ.get("ARBITER_TOOL_COMMIT", "").strip().lower()
     if re.fullmatch(r"[0-9a-f]{40}", env):
-        return {"tool_commit": env, "tool_commit_source": "ARBITER_TOOL_COMMIT"}
+        return {"tool_commit": env, "tool_commit_source": "ARBITER_TOOL_COMMIT", **role}
     here = Path(__file__).resolve().parent
     try:
         head = subprocess.run(["git", "-C", str(here), "rev-parse", "HEAD"], capture_output=True,
                               text=True, timeout=10).stdout.strip()
-        dirty = subprocess.run(["git", "-C", str(here), "status", "--porcelain", "--untracked-files=no"],
-                               capture_output=True, text=True, timeout=10).stdout.strip()
+        status = subprocess.run(["git", "-C", str(here), "status", "--porcelain", "--untracked-files=no"],
+                                capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return {}
-    if not re.fullmatch(r"[0-9a-f]{40}", head):
+    if not re.fullmatch(r"[0-9a-f]{40}", head) or status.returncode != 0:
         return {}
-    return {"tool_commit": head, "tool_commit_source": "git HEAD" + ("（有未提交的修改）" if dirty else "")}
+    dirty = bool(status.stdout.strip())
+    return {"tool_commit": head,
+            "tool_commit_source": "git HEAD" + ("（有未提交的修改，HEAD 不是實際執行的程式）" if dirty else ""),
+            "tool_commit_dirty": dirty, **role}
 
 
 def _pr_rows(args: argparse.Namespace, run_id: str, job: Path,

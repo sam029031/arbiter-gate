@@ -3,6 +3,8 @@
 The fee is released by a registry record for the same source hash, by the auditor the
 requester named: paid for any finished verdict (1, 2 or 3), refunded for verdict 0 or when
 no record settles it before the deadline. The fee never depends on which verdict it was.
+Only the named auditor may settle (contract v2); after the deadline plus the 1-hour
+settlement grace anyone may send the refund, which always goes to the requester.
 """
 from __future__ import annotations
 
@@ -13,7 +15,7 @@ from pathlib import Path
 
 from .chain import ChainError, format_mec, parse_mec
 from .contracts import REQUEST_STATUS, REQUEST_STATUS_ZH
-from .record import sha256_hex
+from .record import normalize_source, sha256_hex
 from .session import Session, add_network_args, open_session
 
 DEFAULT_TTL = 7 * 24 * 3600
@@ -85,10 +87,10 @@ def add_args(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--auditor", required=True, help="指定的稽核者地址（0x…）")
     p.add_argument("--fee", required=True, help="費用，單位 MEC（例如 0.01）")
     p.add_argument("--ttl", type=int, default=DEFAULT_TTL, help="期限秒數（1 小時到 30 天，預設 7 天）")
-    p = sub.add_parser("settle", help="用登錄紀錄結算委託（任何人都可以送）")
+    p = sub.add_parser("settle", help="用登錄紀錄結算委託（只有委託指定的稽核者能送）")
     p.add_argument("request_id", type=int)
     p.add_argument("record_id", type=int)
-    p = sub.add_parser("refund", help="委託到期還沒結算：退款給委託人")
+    p = sub.add_parser("refund", help="委託過了期限再加 1 小時寬限還沒結算：退款給委託人（任何人都能送）")
     p.add_argument("request_id", type=int)
     p = sub.add_parser("status", help="查詢委託狀態")
     p.add_argument("request_id", type=int)
@@ -101,7 +103,8 @@ def run(args: argparse.Namespace) -> int:
     sess = open_session(args, need_deployment=True, need_signer=args.escrow_cmd != "status")
     try:
         if args.escrow_cmd == "request":
-            src = args.source_hash or sha256_hex(Path(args.source).read_bytes())
+            # the record's sourceHash covers the LF-normalized text the gate audits
+            src = args.source_hash or sha256_hex(normalize_source(Path(args.source).read_bytes()))
             out = request(sess, src, args.auditor, parse_mec(args.fee), args.ttl)
         elif args.escrow_cmd == "settle":
             out = settle(sess, args.request_id, args.record_id)

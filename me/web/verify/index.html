@@ -25,6 +25,7 @@
       <button id="theme-btn" class="icon-btn" type="button" aria-label="切換深色或淺色">◐</button>
     </div>
   </div>
+  <div id="trust" class="trust" role="status" hidden></div>
 </header>
 
 <main id="main" class="wrap">
@@ -92,7 +93,8 @@
       <li><b>部署連結分兩種。</b>「由 AuditRegistry 依稽核過的 bytecode 部署」代表部署的就是稽核過的建立程式碼，同一筆紀錄可以部署很多次；「稽核者自行宣告」未經閘門部署，只記下宣告當時的程式碼雜湊，任何稽核者都能宣告任何地址。頁面另外比對每個地址上現在的程式碼。</li>
       <li><b>同一份程式碼的其他紀錄也要看。</b>同一份 bytecode 若另有「已證實可攻擊」的紀錄，頁面會標出來並寫明是誰登錄的；同一位稽核者自相矛盾時，AuditRegistry 不會經由閘門部署。</li>
       <li><b>交易附 0x 雜湊與自我驗證指令。</b>ME 的區塊瀏覽器以 Cosmos 交易雜湊索引；頁面向 ME Hub 查出對應的 Cosmos 交易才給連結，查不到時給 <span class="mono">cast receipt</span> 指令，讓你直接向鏈讀取。</li>
-      <li><b>看清楚稽核者。</b>任何人都能登錄紀錄。標「✓」的稽核者是 repo 裡部署紀錄檔（me/deployments）列出的地址。</li>
+      <li><b>看清楚稽核者。</b>任何人都能登錄紀錄。標「✓」的稽核者是 repo 裡部署紀錄檔（me/deployments）列出的地址，只在官方部署上顯示。</li>
+      <li><b>網址參數不能冒充官方部署。</b>官方部署＝頁面內建（或部署紀錄檔列出）的節點、部署紀錄檔裡的 AuditRegistry，而且鏈上程式碼雜湊和紀錄相同。網址指定的節點、AuditRegistry 或 AuditEscrow，頁首和每個畫面都會標出來，不顯示「✓」；來源無法驗證時（例如網址指定的節點），判定和部署標成未經驗證；程式碼不是 AuditRegistry 的合約，頁面完全不讀。</li>
       <li><b>這個頁面只讀取。</b>不連錢包、不送交易；拖進來的檔案只在你的瀏覽器裡計算 sha256，不會上傳。</li>
     </ul>
   </section>

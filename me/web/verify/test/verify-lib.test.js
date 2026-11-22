@@ -434,3 +434,101 @@ test("sameHash ignores case and refuses zero or missing hashes", () => {
   assert.equal(L.sameHash(undefined, H("11")), false);
   assert.equal(L.sameHash("zz", "zz"), false);
 });
+
+// ---------------------------------------------------------------- official deployment or not
+// web-security-wording-2..4: a node, registry or escrow from the URL is never the official deployment.
+const REG = "0x5fbdb2315678afecb367f032d93f642f64180aa3";
+const ESC = "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512";
+const OTHER = "0x8a791620dd6260079bf849dc5567adc3f2fdc318";
+const FAKE_ESC = "0x0f5d1ef48f12b6f691401bfe88c2037c690a6afe";
+const DEP = L.parseDeployment({
+  network: "me-testnet", chainId: 400, rpc: "https://beta-hub-8545.explorer-testnet.me",
+  registry: { address: REG, codehash: "0x" + "ab".repeat(32) }, escrow: { address: ESC, codehash: "0x" + "cd".repeat(32) },
+  auditors: ["0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"],
+});
+
+test("parseDeployment keeps the node the contracts were deployed through (and only an http(s) one)", () => {
+  assert.equal(DEP.rpc, "https://beta-hub-8545.explorer-testnet.me");
+  assert.equal(L.parseDeployment({ registry: REG, rpc: "javascript:alert(1)" }).rpc, null);
+  assert.equal(L.parseDeployment({ registry: REG }).rpc, null);
+});
+
+test("sameRpc: the same node however the URL is written; any other node is another node", () => {
+  const me = "https://beta-hub-8545.explorer-testnet.me";
+  assert.equal(L.sameRpc(me, me + "/"), true);
+  assert.equal(L.sameRpc(me, "HTTPS://Beta-Hub-8545.explorer-testnet.me"), true);
+  assert.equal(L.sameRpc("http://127.0.0.1:8940", "http://127.0.0.1:8940/"), true);
+  assert.equal(L.sameRpc("http://127.0.0.1:8940", "http://127.0.0.1:8944"), false);
+  assert.equal(L.sameRpc(me, "https://beta-hub-8545.explorer-testnet.me.attacker.example"), false);
+  assert.equal(L.sameRpc(me, "https://attacker.example/?u=https://beta-hub-8545.explorer-testnet.me"), false);
+  assert.equal(L.sameRpc(me, "http://beta-hub-8545.explorer-testnet.me"), false);
+  assert.equal(L.sameRpc(null, null), false);
+  assert.equal(L.sameRpc("javascript:x", "javascript:x"), false);
+});
+
+test("chooseContracts: the file's contracts unless the URL names others; escrow= only beside registry=", () => {
+  const P = (o) => ({ warnings: [], ...o });
+  assert.deepEqual(L.chooseContracts(P({}), DEP),
+    { registry: REG, registryFrom: "file", escrow: ESC, escrowFrom: "file", ignoredEscrow: null });
+  // registry= naming the file's own registry is the file's (an anvil sidecar link does this)
+  assert.equal(L.chooseContracts(P({ registry: REG.toUpperCase().replace("0X", "0x") }), DEP).registryFrom, "file");
+  // an escrow= beside the official registry is ignored, not used (finding 4)
+  assert.deepEqual(L.chooseContracts(P({ escrow: FAKE_ESC }), DEP),
+    { registry: REG, registryFrom: "file", escrow: ESC, escrowFrom: "file", ignoredEscrow: FAKE_ESC });
+  assert.equal(L.chooseContracts(P({ escrow: ESC }), DEP).ignoredEscrow, null);
+  // another registry: everything comes from the URL, never the file's escrow
+  assert.deepEqual(L.chooseContracts(P({ registry: OTHER }), DEP),
+    { registry: OTHER, registryFrom: "url", escrow: null, escrowFrom: null, ignoredEscrow: null });
+  assert.deepEqual(L.chooseContracts(P({ registry: OTHER, escrow: FAKE_ESC }), DEP),
+    { registry: OTHER, registryFrom: "url", escrow: FAKE_ESC, escrowFrom: "url", ignoredEscrow: null });
+  // no trusted file (a node from the URL): only what the URL names, nothing from the file
+  assert.deepEqual(L.chooseContracts(P({}), null),
+    { registry: null, registryFrom: null, escrow: null, escrowFrom: null, ignoredEscrow: null });
+  assert.equal(L.chooseContracts(P({ escrow: FAKE_ESC }), null).ignoredEscrow, FAKE_ESC);
+  assert.equal(L.chooseContracts(P({ registry: REG }), null).registryFrom, "url");
+});
+
+test("trustLevel: official only for the file's registry, through the network's own node, with matching code", () => {
+  const T = (rpcOfficial, registryFrom, code) => L.trustLevel({ rpcOfficial, registryFrom, code }).level;
+  assert.equal(T(true, "file", "match"), "official");
+  assert.equal(T(true, "url", "match"), "genuine");
+  assert.equal(T(true, "url", "mismatch"), "fake");
+  assert.equal(T(true, "file", "mismatch"), "fake");
+  assert.equal(T(true, "file", "unchecked"), "unverified"); // ethers missing: cannot vouch for it
+  assert.equal(T(true, "url", "unchecked"), "unverified");
+  // a node from the URL can serve the genuine AuditRegistry code: never official, never verified
+  for (const from of ["file", "url"]) for (const code of ["match", "mismatch", "unchecked"]) {
+    const t = L.trustLevel({ rpcOfficial: false, registryFrom: from, code });
+    assert.deepEqual([t.level, t.official, t.verified], ["unverified", false, false], `${from}/${code}`);
+  }
+  assert.deepEqual(L.trustLevel({ rpcOfficial: true, registryFrom: "file", code: "match" }), { level: "official", official: true, verified: true });
+  assert.deepEqual(L.trustLevel({ rpcOfficial: true, registryFrom: "url", code: "match" }), { level: "genuine", official: false, verified: true });
+});
+
+test("codeCheck compares keccak256 hashes; anything missing is unchecked, never a match", () => {
+  assert.equal(L.codeCheck(H("ab"), H("ab")), "match");
+  assert.equal(L.codeCheck(H("AB").replace("0xAB", "0xab"), H("ab")), "match");
+  assert.equal(L.codeCheck(H("ab"), H("cd")), "mismatch");
+  assert.equal(L.codeCheck(null, H("ab")), "unchecked");
+  assert.equal(L.codeCheck(H("ab"), null), "unchecked");
+  assert.equal(L.codeCheck(H("00"), H("00")), "unchecked");
+});
+
+test("rebindRegistry: a genuine escrow for another registry reads like the file's; other code does not", () => {
+  const word = (a) => "0".repeat(24) + a.slice(2);
+  const body = (a) => `0x6080${word(a)}5b${word(a)}00`; // the registry immutable, twice
+  assert.equal(L.rebindRegistry(body(OTHER), OTHER, REG), body(REG));
+  assert.equal(L.rebindRegistry(body(REG), REG, REG), body(REG));
+  assert.equal(L.rebindRegistry(body(REG).toUpperCase().replace("0X", "0x"), REG, REG), body(REG));
+  assert.notEqual(L.rebindRegistry("0x6080" + word(FAKE_ESC), OTHER, REG), body(REG));
+  assert.equal(L.rebindRegistry("0xzz", OTHER, REG), null);
+  assert.equal(L.rebindRegistry(body(OTHER), "0x12", REG), null);
+});
+
+test("officialSearch drops the URL's node and contracts, keeps the lookup", () => {
+  const p = L.parseParams(`?rpc=${encodeURIComponent("https://attacker.example/")}&registry=${OTHER}&escrow=${FAKE_ESC}&record=3&theme=light`);
+  assert.equal(L.officialSearch(p, "me-testnet"), "?record=3&theme=light");
+  assert.equal(L.officialSearch(L.parseParams(`?net=anvil&registry=${OTHER}&address=${REG}`), "anvil"), `?net=anvil&address=${REG}`);
+  assert.equal(L.officialSearch(L.parseParams("?rpc=https://x.example"), "custom"), "");
+  assert.equal(L.officialSearch({}, null), "");
+});

@@ -16,9 +16,15 @@ service/sandbox/solc.lock; anything else is now reported in zh-TW.
      pinned contracts compile with exactly that compiler; ^0.8.20 still auto-detects 0.8.37
   3  the audit machinery, no model: the gate's compile check (repo mode) admits 0.8.24 and
      0.7.6, and a hand-written victim-loss exploit composed by the harness is proven
-     under both compilers
+     under both compilers; its results row then goes through what the gate does with a
+     proof -- patch.exploit_from_row + reproduce (A/B/G) -- and the downloadable
+     regression project runs (attack still works on the original, honest path holds),
+     under both: below 0.8 these were rebuilt hermetically and failed with "Found
+     incompatible versions" (sandbox-misc-1)
   4  zh-TW reasons instead of raw forge errors: 0.5.17, 0.8.38, ^0.6.12, a version pinned
-     in foundry.toml; the result page gives the matching advice
+     in foundry.toml; the result page gives the matching advice; a real compile error
+     below 0.8 is refused with solc's diagnostic and its line, exactly as at 0.8, not
+     the hermetic probe's "Found incompatible versions" (sandbox-misc-4)
   5  isolation unchanged: network none, read-only root, ~/.svm not writable, no outbound
      connection
   6  end to end, no model: gate --sandbox on with AuditRegistry.sol (pragma 0.8.24) passes
@@ -166,17 +172,20 @@ def c2(tmp: Path) -> tuple[bool, str]:
 # -- 3 -------------------------------------------------------------------------------------
 def c3(tmp: Path) -> tuple[bool, str]:
     from arbiter import gate
+    from arbiter.dump import REGRESSION_DIR, write_regression
+    from arbiter.patch import exploit_from_row, reproduce
     from arbiter.repo import plan_for
-    from arbiter.workspace import Workspace
+    from arbiter.workspace import VICTIM_ENVIRONMENTS, Workspace
     job = tmp / "c3"
     notes, ok = [], True
     with JobSandbox(job, "solcprobe3") as env, applied_env(env):
         for p in ("0.8.24", "0.7.6"):
+            tag = p.replace(".", "")
             code = BANK.format(p=p)
-            item = repo_item(job, "g" + p.replace(".", ""), code)
-            err = gate._hermetic_compile_error(code, job / ("w" + p.replace(".", "")), item)
+            item = repo_item(job, "g" + tag, code)
+            err = gate._hermetic_compile_error(code, job / ("w" + tag), item)
             plan = plan_for(Path(item["path"]), repo_root=Path(item["repo_root"]))
-            ws = Workspace(job / ("x" + p.replace(".", "")), "x", code, plan=plan)
+            ws = Workspace(job / ("x" + tag), "x", code, plan=plan)
             ctx = ws.prepare_context()
             sol = ws.compose_victim_loss(deploy_code="Bank target = new Bank();",
                                          victim_enter="target.deposit{value: 5 ether}();",
@@ -186,10 +195,59 @@ def c3(tmp: Path) -> tuple[bool, str]:
             r = ws.run_poc(name) if built.ok else None
             proven = bool(r and "[PASS] testArbiterVictimLoss()" in r.combined)
             ws.cleanup()
-            ok &= err is None and ctx.get("ok") and ctx.get("solc") == p and proven
+            # What the gate does with that proof: the row as run.py records it, A/B/G, and
+            # the regression download.
+            row = {"sample_id": item["id"], "source": code, "path": item["path"],
+                   "context": {**ctx, "plan": {"repo_root": plan.repo_root.as_posix(),
+                                               "target": plan.target.as_posix(),
+                                               "target_import": plan.target_import,
+                                               "pragma": plan.test_pragma,
+                                               "chosen_src": plan.chosen_src,
+                                               "remappings": list(plan.remappings)}},
+                   "outcome": {"proven": True, "pocs": [
+                       {"name": "ExploitPoc", "passed": True, "adjudicated": True,
+                        "predicate": "victim_loss", "solidity": sol, "hypothesis": "re-entry"}],
+                       "findings": [{"poc_name": "ExploitPoc", "title": "re-entry"}]}}
+            ex = exploit_from_row(row)
+            base = reproduce(ex["source"], ex["solidity"], job / ("e" + tag), "bank",
+                             repo=ex["repo"])
+            abg = base.get("abg") or []
+            measured = (base["status"] == "pass" and len(abg) == 4
+                        and all(e["A"] and e["B"] is not None and e["B"] < e["A"] for e in abg))
+            envs = [{"env": e["env"], "endow_wei": endow, "warp_s": warp, "rounds": rounds,
+                     "A": e["A"], "B": e["B"], "G": e["G"], "unit": e.get("unit")}
+                    for e, (endow, warp, rounds) in zip(abg, VICTIM_ENVIRONMENTS)]
+            proj = job / ("reg" + tag)
+            reg_ok, reg_note = False, "not built (A/B/G not measured)"
+            if measured:
+                write_regression(proj, source=code, contract_file="Bank.sol",
+                                 exploit_solidity=ex["solidity"], environments=envs,
+                                 finding={"title": "re-entry"}, solc=str(ctx.get("solc") or ""))
+                t = run([FORGE, "test", "--json", "--offline", "--match-contract",
+                         "^TestArbiterRegression$"], cwd=proj)
+                start = t.stdout.find("{")
+                res = {}
+                if start >= 0:
+                    for suite in json.loads(t.stdout[start:]).values():
+                        for tn, tr in (suite.get("test_results") or {}).items():
+                            res[tn.split("(")[0]] = tr.get("status") == "Success"
+                honest = [v for k, v in res.items() if k.startswith("testHonestPath")]
+                reg_ok = res.get("testExploitBlocked") is False and len(honest) == 4 and all(honest)
+                reg_note = (f"{REGRESSION_DIR}: ExploitBlocked "
+                            f"{'fails (attack works)' if res.get('testExploitBlocked') is False else res.get('testExploitBlocked')}, "
+                            f"{sum(honest)}/4 honest pass" if res else
+                            f"no test ran: {(t.stdout + t.stderr).strip().splitlines()[-1:]}")
+            route = "one-file repo" if ex["repo"] else "hermetic"
+            want_route = "one-file repo" if p.startswith("0.7") else "hermetic"
+            ok &= (err is None and ctx.get("ok") and ctx.get("solc") == p and proven
+                   and measured and reg_ok and route == want_route)
             notes.append(f"{p}: gate compile check {'admits' if err is None else 'REFUSES ' + str(err)}, "
                          f"context solc {ctx.get('solc')}, test pragma {ws.pragma}, "
-                         f"victim-loss exploit {'proven' if proven else 'NOT proven'}")
+                         f"victim-loss exploit {'proven' if proven else 'NOT proven'}; A/B/G "
+                         f"({route}) {base['status']}"
+                         + (f" A={abg[0]['A'] / 1e18:g} B={abg[0]['B'] / 1e18:g} ETH" if measured else
+                            f" {base.get('reason')} {str(base.get('error') or '')[:60]}")
+                         + f"; regression {reg_note}")
     return bool(ok), "; ".join(notes)
 
 
@@ -204,7 +262,11 @@ def c4(tmp: Path) -> tuple[bool, str]:
         "^0.6.12": ("context_unbuildable: ARBITER 的測試程式需要 solc 0.7.4 以上，這份合約的 pragma（^0.6.12）"
                     f"只接受更舊的版本，所以目前沒辦法稽核（沙箱裡可用 {SUPPORTED}）"),
     }
-    got, pinned = {}, ""
+    # A genuine compile error (msg.valu), below 0.8 and at 0.8: the same solc diagnostic and
+    # line either way. Below 0.8 it used to be the hermetic probe's version mismatch.
+    typo_want = ('context_unbuildable: Error (9582): Member "valu" not found or not visible after '
+                 'argument-dependent lookup in msg. --> src/Target.sol:5:62:')
+    got, typo, pinned = {}, {}, ""
     t0 = time.monotonic()
     with JobSandbox(job, "solcprobe4") as env, applied_env(env):
         for p in want:
@@ -212,6 +274,10 @@ def c4(tmp: Path) -> tuple[bool, str]:
                 if p == "0.5.17" else BANK.format(p=p)
             item = repo_item(job, "g" + p.replace(".", "").replace("^", "c"), code)
             got[p] = gate._hermetic_compile_error(code, job / ("w" + p.replace(".", "").replace("^", "c")), item)
+        for p in ("^0.7.0", "^0.8.0"):
+            code = BANK.format(p=p).replace("msg.value", "msg.valu")
+            tag = "t" + p.replace(".", "").replace("^", "c")
+            typo[p] = gate._hermetic_compile_error(code, job / ("w" + tag), repo_item(job, tag, code))
         ok_b, _, out = forge_build(job / "pinned", BANK.format(p="^0.5.0"), pin="0.5.17")
         pinned = _first_error(out, "0.5.17")
     took = time.monotonic() - t0
@@ -221,9 +287,13 @@ def c4(tmp: Path) -> tuple[bool, str]:
                                      "detail": "context_unbuildable: Error (2314): Expected ';' but got '}'"})
     ok = (got == want and not ok_b and pinned == f"沙箱裡沒有 solc 0.5.17（目前支援 {SUPPORTED}）"
           and "改成上面列出的其中一個版本" in page_missing and "沙箱不能連網" in page_missing
-          and "forge build" not in page_missing and "forge build" in page_plain)
+          and "forge build" not in page_missing and "forge build" in page_plain
+          and typo == {"^0.7.0": typo_want, "^0.8.0": typo_want})
     detail = "; ".join(f"{p} -> {got[p]!r}" + ("" if got[p] == want[p] else f" (WANTED {want[p]!r})")
                        for p in want)
+    detail += "; " + "; ".join(f"{p} with msg.valu -> {typo[p]!r}"
+                               + ("" if typo[p] == typo_want else " (WANTED the solc diagnostic and line)")
+                               for p in typo)
     return ok, (f"{detail}; foundry.toml pinned 0.5.17 -> {pinned!r}; result page advice switches "
                 f"to the pragma advice: {'改成上面列出的其中一個版本' in page_missing} (plain compile "
                 f"error keeps the forge build advice: {'forge build' in page_plain}); {took:.0f}s")

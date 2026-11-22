@@ -42,9 +42,9 @@ from typing import Any
 
 from .diffscan import git_diff, parse_diff, scope_from_diff
 from .sarif import strict_retry_text
-from .technique import NOVEL, describe
+from .technique import counts_as_new, describe
 from .triage import triage_all
-from .units import format_amount
+from .units import format_amount, is_wei
 from .verdict import LABELS, NO_PROVABLE, NOT_EXECUTED, PROVEN, STATIC_HINT
 
 COMMENT_MARKER = "<!-- arbiter-gate:comment -->"
@@ -341,8 +341,12 @@ def _abg_table(envs: list[dict[str, Any]]) -> list[str]:
             "|---|---|---|---|---|---|---|" + ("---|---|" if owner else "")]
     for r in envs:
         u = r.get("unit")
-        endow = (f"{_eth(r.get('endow_wei'))} ETH" if u in (None, "wei")
-                 else format_amount(r.get("endow_wei"), u, zh=True))
+        # endow_wei is what vm.deal gives the victim in ether, in every proof. A token proof
+        # also hands the victim up to that many of the token's base units, capped by what the
+        # deployer holds (workspace._VICTIM_TOKEN_ENDOW) -- a cap, never a known balance.
+        endow = f"{_eth(r.get('endow_wei'))} ETH"
+        if not is_wei(u):
+            endow += f"；代幣最多 {format_amount(r.get('endow_wei'), u, zh=True)}（以部署者持有量為上限）"
         rows.append(f"| {r.get('env')} | {endow} | {r.get('warp_s')} 秒 | "
                     f"{r.get('rounds')} | {format_amount(r.get('A'), u, zh=True)} | "
                     f"{format_amount(r.get('B'), u, zh=True)} | "
@@ -405,6 +409,11 @@ _STATUS_ZH = {"pass": "通過", "fail": "沒通過", "skipped": "沒有跑（不
               "not_diverse": "AI 沒有換手法（不算通過）"}
 _NOT_DIVERSE_NOTE = ("系統比對了再攻擊時每個攻擊程式的執行軌跡：用的都是之前已證實的手法（只是換了寫法），"
                      "所以不算「換手法再攻擊」通過。修補本身仍通過檢查 0～4，是目前找到的最好修補。")
+# not_diverse because no new-technique exploit ever ran on the patched contract (it did not
+# compile, or its trace never reached the contract): no trace showed it was new.
+_NOT_RUN_NOTE = ("系統比對了再攻擊時每個攻擊程式的執行軌跡：沒有一個是在修補後的合約上實際執行、又和之前不同的手法"
+                 "（沒有編譯成功、或軌跡沒有碰到合約的攻擊程式，什麼都沒有測到，不算），"
+                 "所以不算「換手法再攻擊」通過。修補本身仍通過檢查 0～4，是目前找到的最好修補。")
 
 
 def _rounds_markdown(p: dict[str, Any]) -> list[str]:
@@ -432,7 +441,7 @@ def _rounds_markdown(p: dict[str, Any]) -> list[str]:
                 if e.get("source") == "reattack" and e.get("result") != "proven":
                     detail = f"{e.get('turns')} 回合、{e.get('elapsed_s')} 秒"
                     if "attempts" in e:
-                        new = sum(a.get("novelty") in NOVEL for a in e["attempts"])
+                        new = sum(counts_as_new(a) for a in e["attempts"])
                         detail += f"；試了 {len(e['attempts'])} 個攻擊，{new} 個是新手法"
                 else:
                     detail = f"假設：{hyp[:160]}" if hyp else ""
@@ -447,10 +456,12 @@ def _rounds_markdown(p: dict[str, Any]) -> list[str]:
             out.append(f"| {e.get('round')} | {who} | {e.get('label', '')} | {detail} |")
         ra = p.get("reattack") or {}
         if ra.get("label"):
+            tried = ra.get("attempts") or []
+            same = bool(tried) and all(a.get("novelty") == "same" for a in tried)
             out += ["", f"**{ra['label']}**。" + ("「未成功」只代表這一次換手法沒有找到能成功的攻擊，"
                                                    "不代表合約安全。" if ra.get("status") == "pass" else
-                                                   _NOT_DIVERSE_NOTE if ra.get("status") == "not_diverse"
-                                                   else "")]
+                                                   (_NOT_DIVERSE_NOTE if same else _NOT_RUN_NOTE)
+                                                   if ra.get("status") == "not_diverse" else "")]
     return out
 
 

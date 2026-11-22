@@ -25,6 +25,10 @@ SARIF, the PR comment, the exit code.
                  called, the touched functions are still listed
   fork           python3 -m arbiter.prgate refuse-fork    -> exit 2, no LLM, SARIF
                  executionSuccessful false
+  token_endow    the comment's A/B/G table for a token proof: the victim's initial balance
+                 stays the ether vm.deal gives it, plus the token amount as a cap ("最多",
+                 bounded by what the deployer holds) -- never endow_wei divided by the
+                 token's decimals (1e+13 USDC for 10 ETH: gate-logic-6)
 
 runs/ is not in git: without runs/spark-test-2.* the probe says so and exits 2.
 """
@@ -250,6 +254,19 @@ def main() -> int:
         check("fork", p6.returncode == 2 and "fork" in md and "這不是發現漏洞" in md
               and sar["runs"][0]["invocations"][0]["executionSuccessful"] is False,
               f"rc={p6.returncode} sarif={sarif_valid(tmp / 'fork.sarif', tmp / 'fork.gate.json')}")
+
+        # 7. a token proof's A/B/G table in the comment (rows as gate._environments writes them)
+        from arbiter import prgate
+        usdc = {"token": "USDC", "decimals": 6}
+        tok = prgate._abg_table(gate._environments(
+            [{"env": i, "A": 2_000_000, "B": 0, "G": 2_000_000, "unit": usdc} for i in range(4)]))
+        eth = prgate._abg_table(gate._environments(
+            [{"env": i, "A": 10**18, "B": 0, "G": 10**18, "unit": "wei"} for i in range(4)]))
+        check("token_endow", tok[2].startswith("| 0 | 10 ETH；代幣最多 1e+13 USDC（以部署者持有量為上限） | 0 秒 |")
+              and tok[3].startswith("| 1 | 10000 ETH；代幣最多 1e+16 USDC") and "| 2 USDC | 0 USDC | 2 USDC |" in tok[2]
+              and not any(re.search(r"^\| \d \| [\d.e+]+ USDC \|", r) for r in tok)
+              and eth[2].startswith("| 0 | 10 ETH | 0 秒 | 1 | 1 ETH | 0 ETH | 1 ETH |"),
+              f"token env 0: {tok[2]}; ether env 0: {eth[2]}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     good = sum(ok for _, ok, _ in results)

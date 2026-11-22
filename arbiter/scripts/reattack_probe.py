@@ -22,6 +22,10 @@ harness exactly as an agent's run_exploit would be.
                rejected_reattack, "修補未通過再攻擊"
   not_run      the re-attack does not complete -> the patch stands on 0-4, check 5 is
                "skipped", never a pass
+  passed_attempt  a re-attack result that says not_proven although one of its attempts
+               PASSED against the patch -> still a broken patch: rejected_reattack, check
+               5 "fail", never a pass (gate-logic-2; reattack() itself turns such an
+               attempt into the proven re-attack, technique_probe's "unsubmitted")
 
     python3 scripts/reattack_probe.py
 """
@@ -202,6 +206,8 @@ def main() -> int:
                  "attempts": [{"name": "ElsePoc", "hypothesis": "something else", "passed": False,
                                "fingerprint": None, "novelty": "new_class"}]}
         same = {**quiet, "novel": False, "attempts": [{**quiet["attempts"][0], "novelty": "same"}]}
+        passed = {**quiet, "attempts": [{**quiet["attempts"][0], "passed": True,
+                                         "novelty": "new_entry"}]}
 
         cases = [
             ("two_rounds", [P_ALL, P_BOTH], [new_attack, quiet], "accepted",
@@ -213,6 +219,8 @@ def main() -> int:
              "A1:proven -> D1:accepted -> A2:proven -> D2:accepted -> A3:proven"),
             ("not_run", [P_ALL], [{"status": "not_executed", "reason": "scripted"}], "accepted",
              "A1:proven -> D1:accepted -> A2:not_executed"),
+            ("passed_attempt", [P_ALL], [passed], "rejected_reattack",
+             "A1:proven -> D1:accepted -> A2:proven"),
         ]
         for name, patches, script, want, want_tl in cases:
             calls: list[dict[str, Any]] = []
@@ -241,6 +249,8 @@ def main() -> int:
                 ok = ok and c5 == "skipped"
             if name == "not_diverse":
                 ok = ok and c5 == "not_diverse" and rec["timeline"][-1]["novel"] is False
+            if name == "passed_attempt":
+                ok = ok and c5 == "fail" and len(gw.seen) == 1
             check(name, ok, detail)
     finally:
         patch_mod.reattack = real

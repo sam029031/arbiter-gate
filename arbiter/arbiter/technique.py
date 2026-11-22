@@ -34,20 +34,29 @@ The fingerprint (all lists sorted, so two fingerprints compare as data):
     force_feed   ether forced into the target by selfdestruct (the beneficiary must be the
                  target: the finals exploit self-destructs a helper to fund ITSELF)
     donation     a third-party token transfer(target, ...) by the attacker
-    hook_calls   target functions the attacker's hooks call in its SOURCE -- what it meant
-                 to re-enter, even where a patch keeps the hook from ever running
+    hook_calls   target functions the attacker's hooks reach in its SOURCE -- what it
+                 meant to re-enter, even where a patch keeps the hook from ever running.
+                 Followed through the attacker's own code: a hook that calls a helper,
+                 this.f(), the attacker's attack(), or a function of another contract the
+                 agent wrote counts the target calls made there too
     classes      reentrancy / readonly_reentrancy / force_feed / donation / callback /
                  direct
 
 A PoC that does not compile has no trace; it gets the same fields from its source alone
 (`source: "static"`: entry and hook_calls by function name). So does a PoC whose trace
-never reaches the target.
+never reaches the target. A static fingerprint can show an attempt repeats a known
+attack, never that it is new: it ran nothing against the patch, so its novelty is
+"same" or "unknown" (fingerprint_attempts), and only a compiled, traced attempt can be
+new_entry / new_class.
 
 novelty(original, attempt):
     same       shares a re-entry edge with the original; or re-enters nothing in its trace
                while its hooks call what the original re-entered (the patch closed the
-               callback, the attacker had not changed its mind); or the same classes
-               through no function the original did not already call
+               callback, the attacker had not changed its mind); or re-enters nothing
+               while the target hands it control from a function the original re-entered,
+               through no entry the original did not call (the same, from the trace
+               alone); or the same classes through no function the original did not
+               already call
     new_entry  the same classes through a different door: disjoint re-entry edges, or a
                state-changing entry the original never called
     new_class  a different set of classes
@@ -58,7 +67,10 @@ hidden: a reworded attack that adds a harmless call to a function the original n
 called reads as new_entry; ether forced in by a selfdestruct whose beneficiary appears
 neither in that frame's input nor in the self-destructing contract's constructor
 arguments is not seen; a proxy's DELEGATECALL is not followed into the implementation;
-target storage slots are not compared (that needs -vvvvv, 15 MB of JSON for a toy).
+target storage slots are not compared (that needs -vvvvv, 15 MB of JSON for a toy); a
+hook's calls are followed by function name through the agent's source, so a call made
+through a function pointer or assembly is not, and a griefing hook that only reverts
+from a function the original re-entered reads as the same attack.
 """
 
 from __future__ import annotations
@@ -71,6 +83,7 @@ from typing import Any
 NOVELTY = ("same", "unknown", "new_entry", "new_class")   # weakest first
 NOVEL = ("new_entry", "new_class")
 TRACE_TIMEOUT = 240
+_REENTRY = {"reentrancy", "readonly_reentrancy"}
 
 _VM = "7109709ecfa91a80626ff3989d68f67f5b1dd12d"
 _CONSOLE = "000000000000000000636f6e736f6c652e6c6f67"
@@ -383,6 +396,41 @@ def _strip_comments(code: str) -> str:
     return re.sub(r"//[^\n]*|/\*.*?\*/", "", code, flags=re.DOTALL)
 
 
+def _own_calls(code: str, own: set[str]) -> set[str]:
+    """Functions of the agent's own code that `code` calls: internal f(), this.f(),
+    helper.f(), f{value: ...}(), or by signature / selector."""
+    found = set(re.findall(r"(?<![\w$])(\w+)\s*(?:\{[^{}]*\}\s*)?\(", code))
+    found |= set(re.findall(r"encodeWithSignature\(\s*\"(\w+)\(", code))
+    found |= set(re.findall(r"\.(\w+)\.selector\b", code))
+    found |= set(re.findall(r"encodeCall\(\s*[\w.]+\.(\w+)", code))
+    return found & own
+
+
+def _hook_reach(agent: str, names: set[str]) -> set[str]:
+    """Target functions the attacker's hooks reach in its source.
+
+    Followed through the agent's own code, not only the calls written inline in a hook: a
+    receive() that calls an internal helper, this.again(), the attacker's own attack(), or
+    a function of another contract the agent wrote re-enters just as surely. Missing that
+    made a patch that closes the callback (transfer's 2300 gas, pull payment) read the
+    SAME re-entrancy as a new class of attack: the trace shows no re-entry because the
+    patch stopped it, and the hook's own body named no target function (gate-logic-1)."""
+    bodies = _bodies(agent)
+    own: dict[str, list[str]] = {}
+    for name, body in bodies:
+        own.setdefault(name, []).append(body)
+    todo = [body for name, body in bodies if name in _HOOK_NAMES]
+    seen: set[str] = set()
+    reached: set[str] = set()
+    while todo:
+        body = todo.pop()
+        reached |= _called(body, names)
+        for f in _own_calls(body, set(own)) - seen:
+            seen.add(f)
+            todo.extend(own[f])
+    return reached
+
+
 def static_fingerprint(solidity: str, source: str) -> dict[str, Any]:
     """What the PoC's own source says it does: target functions it calls, and from where."""
     src = _strip_comments(source)
@@ -397,11 +445,10 @@ def static_fingerprint(solidity: str, source: str) -> dict[str, Any]:
     start = max(sol.rfind("interface _ArbiterHarness", 0, end),
                 sol.rfind("interface _ArbiterToken", 0, end), 0)
     agent = sol[start:end]
-    hooks: set[str] = set()
+    hooks = _hook_reach(agent, names)
     entry_code = agent
     for name, body in _bodies(agent):
         if name in _HOOK_NAMES:
-            hooks |= _called(body, names)
             entry_code = entry_code.replace(body, "", 1)
     m = _EOA_PRANK.search(sol[end:])
     if m:
@@ -447,7 +494,14 @@ def fingerprint_poc(ws: Any, poc: str, solidity: str, source: str) -> dict[str, 
 def fingerprint_attempts(ws: Any, pocs: list[dict[str, Any]], source: str,
                          known: list[dict[str, Any] | None]) -> list[dict[str, Any]]:
     """Every adjudicated PoC of an audit, re-run traced in the audit's own workspace (the
-    patched contract) and judged against the attacks already known."""
+    patched contract) and judged against the attacks already known; one entry per
+    adjudicated PoC, in order.
+
+    Only a compiled exploit whose trace reached the target ran anything against the
+    patch. One judged from its source alone (it did not compile, or its trace never
+    touched the target) may show it repeats a known attack -- "same" -- but never that it
+    is new: such an attempt is "unknown" rather than new_entry / new_class, so a PoC that
+    never built cannot make check 5 pass (gate-logic-3)."""
     attempts = []
     for p in pocs:
         if not p.get("adjudicated"):
@@ -463,11 +517,22 @@ def fingerprint_attempts(ws: Any, pocs: list[dict[str, Any]], source: str,
                 fp = static_fingerprint(sol, source)
         except Exception:  # noqa: BLE001 -- never lose the audit's result to a fingerprint;
             fp = None      # an attempt that cannot be fingerprinted is "unknown", not new
+        nv = novelty_against(known, fp)
+        if nv in NOVEL and not (p.get("compiled") and (fp or {}).get("source") == "trace"):
+            nv = "unknown"
         attempts.append({"name": p.get("name"), "predicate": p.get("predicate"),
                          "hypothesis": " ".join(str(p.get("hypothesis") or "").split())[:200],
                          "compiled": bool(p.get("compiled")), "passed": bool(p.get("passed")),
-                         "fingerprint": fp, "novelty": novelty_against(known, fp)})
+                         "fingerprint": fp, "novelty": nv})
     return attempts
+
+
+def counts_as_new(attempt: dict[str, Any]) -> bool:
+    """Does this re-attack attempt count as a different technique for check 5? Only one
+    that compiled, was traced against the patched contract, and is new_entry / new_class
+    (a recording made before fingerprint_attempts downgraded static ones included)."""
+    return (attempt.get("novelty") in NOVEL and bool(attempt.get("compiled"))
+            and (attempt.get("fingerprint") or {}).get("source") == "trace")
 
 
 # -- comparing -----------------------------------------------------------------------------
@@ -501,9 +566,19 @@ def novelty(original: dict[str, Any] | None, attempt: dict[str, Any] | None) -> 
     if not ae and set(attempt.get("hook_calls") or []) & reentered:
         return "same"
     oc, ac = set(original.get("classes") or []), set(attempt.get("classes") or [])
+    # The trace alone, for a hook whose re-entrant call the source cannot show: the patch
+    # stopped the re-entry, so the target only handed the attacker control -- from a
+    # function the original re-entered -- and the attempt entered nothing the original
+    # did not. That is the original attack failing, not a callback or direct attack.
+    outer = {o for o, _, _ in oe}
+    handed = {c.split(" -> ", 1)[0] for c in attempt.get("callbacks") or []}
+    if (oc & _REENTRY and not ae and ac <= {"callback", "direct"} and handed & outer
+            and {_name(s) for s in attempt.get("entry") or []}
+            <= {_name(s) for s in original.get("entry") or []}):
+        return "same"
     if oc != ac:
         return "new_class"
-    if oc & {"reentrancy", "readonly_reentrancy"}:
+    if oc & _REENTRY:
         if not oe or not ae:   # one side has only its source's word for the re-entry
             return ("same" if set(attempt.get("hook_calls") or []) & reentered
                     else "new_entry")
@@ -575,9 +650,8 @@ another class of attack. If none works, call conclude_safe and say what you trie
 
 _FOLLOW_UP = """
 
-A first re-attack of this patched contract already ran the exploits below, and their \
-traces show the same mechanism as a proven attack above, so none of them counts as a new \
-technique:
+A first re-attack of this patched contract already ran the exploits below, and none of \
+them counts as a new technique:
 {attempts}
 Do not run them again. Try a genuinely different mechanism, or call conclude_safe."""
 
@@ -596,9 +670,23 @@ def reattack_brief(diff: str, known: list[dict[str, Any]]) -> str:
                          known=listed or "  (none recorded)")
 
 
+def _why_not_new(a: dict[str, Any]) -> str:
+    fp = a.get("fingerprint") or {}
+    if not a.get("compiled"):
+        return "it did not compile, so it tested nothing against the patched contract"
+    if not fp:
+        return "it could not be measured"
+    if fp.get("source") != "trace":
+        return "its trace did not reach the patched contract (or could not be read)"
+    if a.get("novelty") == "same":
+        return "its trace shows the same mechanism as a proven attack above"
+    return "it could not be compared with the proven attacks"
+
+
 def follow_up_brief(attempts: list[dict[str, Any]]) -> str:
     if not attempts:
         return _FOLLOW_UP_EMPTY
     return _FOLLOW_UP.format(attempts="\n".join(
         f"  - {a['name']}: {a['hypothesis'] or '(no hypothesis)'}\n"
-        f"    mechanism: {describe(a['fingerprint'])}" for a in attempts))
+        f"    mechanism: {describe(a['fingerprint'])}\n"
+        f"    not new because {_why_not_new(a)}" for a in attempts))

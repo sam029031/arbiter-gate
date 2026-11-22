@@ -1,21 +1,23 @@
 {
  "schema": "arbiter-gate/0.1",
- "generated_at": "2026-11-21T23:27:52+0800",
+ "generated_at": "2026-11-22T17:13:08+0800",
+ "tool_commit": "06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+ "tool_commit_source": "ARBITER_TOOL_COMMIT",
  "input": {
   "mode": "file",
   "file": "AuditRegistry.sol",
-  "run_id": "dogfood-registry-2",
+  "run_id": "fresh-registry",
   "workspace_mode": "repo",
-  "llm_requests_this_invocation": 10,
+  "llm_requests_this_invocation": 6,
   "usage": {
-   "requests": 10,
-   "prompt_tokens": 118008,
-   "completion_tokens": 7529,
+   "requests": 6,
+   "prompt_tokens": 69439,
+   "completion_tokens": 4493,
    "cost_usd": 0.0,
    "retries": 0,
    "http_errors": 0,
    "parse_failures": 0,
-   "reasoning_recoveries": 8,
+   "reasoning_recoveries": 6,
    "system_fingerprints": [
     "fp_ollama"
    ],
@@ -23,11 +25,20 @@
     "arbiter-gpt:latest"
    ]
   },
-  "results": "runs/gate/dogfood-registry-2/dogfood-registry-2.results.jsonl",
-  "llm_requests_audit": 10,
+  "results": "fresh-registry.results.jsonl",
+  "llm_requests_audit": 6,
   "llm_requests_repair": 0,
   "sandbox": {
-   "status": "off"
+   "status": "on",
+   "image": "arbiter-sandbox:me1",
+   "container_start_s": 0.42,
+   "memory_peak_bytes": 43999232,
+   "network": "none",
+   "env": "PATH only",
+   "dep_cache": {
+    "ok": true,
+    "files": 2405
+   }
   }
  },
  "models": [
@@ -39,17 +50,17 @@
  "files": [
   {
    "id": "file::AuditRegistry",
-   "path": "runs/gate/dogfood-registry-2/dogfood/AuditRegistry.sol",
+   "path": "AuditRegistry.sol",
    "artifact": {
     "uri": "AuditRegistry.sol",
-    "sha256": "df309e67d89ed4d7647b52cc3a86cf8540de38de2ab93ac2939734bdb9f34654"
+    "sha256": "a4041806ecff3dcbaec14940862cdbffbba638491da32c95720c512cec6d9014"
    },
-   "verdict": "static_hint_unproven",
-   "label": "靜態工具提示但未證實",
+   "verdict": "no_provable_attack",
+   "label": "未發現可證明攻擊（不等於安全）",
    "reason": "agent_concluded_no_attack",
    "detail": "",
-   "turns": 10,
-   "elapsed_s": 214.6,
+   "turns": 6,
+   "elapsed_s": 124.43,
    "static_analysis": {
     "status": "ran",
     "label": "",
@@ -57,35 +68,15 @@
     "tool": "slither 0.11.6",
     "solc": "0.8.24",
     "threshold": "impact ≥ Medium 且 confidence ≥ Medium",
-    "findings_total": 3,
-    "hints": [
-     {
-      "check": "incorrect-equality",
-      "impact": "Medium",
-      "confidence": "High",
-      "line": 94,
-      "end_line": 135,
-      "function": "register",
-      "message": "AuditRegistry.register(AuditRegistry.RecordInput) (AuditRegistry.sol#94-135) uses a dangerous strict equality:"
-     }
-    ]
+    "findings_total": 2,
+    "hints": []
    },
    "fixture_note": "",
-   "static_hints": [
-    {
-     "check": "incorrect-equality",
-     "impact": "Medium",
-     "confidence": "High",
-     "line": 94,
-     "end_line": 135,
-     "function": "register",
-     "message": "AuditRegistry.register(AuditRegistry.RecordInput) (AuditRegistry.sol#94-135) uses a dangerous strict equality:"
-    }
-   ],
-   "hint_note": "這是自動掃描工具的提示，系統沒有證實它真的能被攻擊。",
+   "static_hints": [],
+   "hint_note": "",
    "findings": []
   }
  ],
- "elapsed_s": 216.34,
+ "elapsed_s": 127.54,
  "note": "已證實可攻擊的判定附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。"
 }

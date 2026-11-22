@@ -21,6 +21,13 @@ Two exploits, so the check does not depend on one recording:
      fix = the arbiter-gpt patch in runs/spark-test-2.patches.jsonl, always-revert =
      the same `revert("paused")` at the top of unstake(). runs/ is not in git, so a
      clone without it passes --evalset-only.
+  C  a one-file upload pinned to solc 0.7.6, as `gate --file X --mode repo` audits it: the
+     exploit composed in the one-file repository's plan (test pragma >=0.6.0), the results
+     row as run.py writes it, then exploit_from_row -> reproduce (A/B/G) -> the regression
+     project, and verify_fix on the fix (check 4 not applicable: one file). It used to be
+     rebuilt hermetically, beside a >=0.8.0 Vm.sol: "Found incompatible versions", so a
+     proof that reproduces read 重現失敗 and no patch or regression test was made
+     (sandbox-misc-1). Needs solc 0.7.6 in forge's cache.
 
 Pure CPU and forge. No gateway requests.
 """
@@ -42,10 +49,73 @@ sys.path.insert(0, str(RIG / "scripts"))
 
 import victim_probe as vp  # noqa: E402
 from arbiter.dump import REGRESSION_DIR, write_regression  # noqa: E402
-from arbiter.patch import apply_diff, exploit_from_row, reproduce  # noqa: E402
+from arbiter.patch import apply_diff, exploit_from_row, reproduce, verify_fix  # noqa: E402
+from arbiter.repo import plan_for  # noqa: E402
 from arbiter.workspace import VICTIM_ENVIRONMENTS, Workspace  # noqa: E402
 
 _UNSTAKE = "    function unstake() external {\n"
+BANK07 = """// SPDX-License-Identifier: MIT
+pragma solidity 0.7.6;
+contract Bank {
+    mapping(address => uint256) public bal;
+    function deposit() external payable { bal[msg.sender] += msg.value; }
+    function withdraw() external {
+        uint256 a = bal[msg.sender];
+        (bool ok, ) = msg.sender.call{value: a}("");
+        require(ok);
+        bal[msg.sender] = 0;
+    }
+}
+"""
+BANK07_FIX = BANK07.replace("""        (bool ok, ) = msg.sender.call{value: a}("");
+        require(ok);
+        bal[msg.sender] = 0;
+""", """        bal[msg.sender] = 0;
+        (bool ok, ) = msg.sender.call{value: a}("");
+        require(ok);
+""")
+BANK07_REVERT = BANK07.replace("    function withdraw() external {\n",
+                               "    function withdraw() external {\n        revert(\"paused\");\n")
+BANK_ATTACKER = """contract Attacker {
+    Bank public b;
+    uint256 public n;
+    constructor(address t) { b = Bank(t); }
+    function attack() external {
+        b.deposit{value: 1 ether}();
+        b.withdraw();
+    }
+    receive() external payable {
+        if (address(b).balance >= 1 ether && n < 20) { n++; b.withdraw(); }
+    }
+}"""
+assert BANK07_FIX != BANK07 and BANK07_REVERT != BANK07
+
+
+def one_file_row(root: Path) -> dict:
+    """What `gate --file Bank.sol --mode repo` records for a 0.7.6 file: the one-file
+    repository in the job, the audit's plan, and an exploit the harness composed there."""
+    repo = root / "C_job" / "contracts"
+    repo.mkdir(parents=True)
+    (repo / "Bank.sol").write_text(BANK07, encoding="utf-8")
+    plan = plan_for(repo / "Bank.sol", repo_root=repo)
+    ws = Workspace(root / "C_audit", "file::Bank", BANK07, plan=plan)
+    try:
+        ctx = ws.prepare_context()
+        sol = ws.compose_victim_loss(deploy_code="Bank target = new Bank();",
+                                     victim_enter="target.deposit{value: 5 ether}();",
+                                     victim_exit="target.withdraw();", attacker_code=BANK_ATTACKER)
+    finally:
+        ws.cleanup()
+    return {"sample_id": "file::Bank", "source": BANK07, "path": str(repo / "Bank.sol"),
+            "context": {**ctx, "plan": {"repo_root": plan.repo_root.as_posix(),
+                                        "target": plan.target.as_posix(),
+                                        "target_import": plan.target_import,
+                                        "pragma": plan.test_pragma, "chosen_src": plan.chosen_src,
+                                        "remappings": list(plan.remappings)}},
+            "outcome": {"proven": True, "pocs": [
+                {"name": "BankDrainPoc", "passed": True, "adjudicated": True,
+                 "predicate": "victim_loss", "solidity": sol, "hypothesis": "re-enter withdraw"}],
+                "findings": [{"poc_name": "BankDrainPoc", "title": "withdraw re-entrancy"}]}}
 EXPECT = {
     "original": ("fail", "pass"),
     "fix": ("pass", "pass"),
@@ -100,10 +170,11 @@ def run_case(label: str, base_proj: Path, contract_file: str, source: str,
 
 
 def build(name: str, source: str, solidity: str, contract_file: str, root: Path,
-          solc: str = "") -> tuple[Path, list[dict]]:
-    base = reproduce(source, solidity, root, f"{name}_base")
+          solc: str = "", repo: dict | None = None) -> tuple[Path, list[dict]]:
+    base = reproduce(source, solidity, root, f"{name}_base", repo=repo)
     if base["status"] != "pass":
-        raise RuntimeError(f"{name}: the stored exploit does not reproduce: {base}")
+        raise RuntimeError(f"{name}: the stored exploit does not reproduce: "
+                           f"{base.get('reason')} {str(base.get('error') or '')[:160]}")
     envs = environments(base["abg"])
     proj = root / f"{name}_project"
     write_regression(proj, source=source, contract_file=contract_file,
@@ -131,7 +202,7 @@ def main() -> int:
         S = vp.load("S_reentrancy_unstake")
         drain = Workspace(root, "compose", V).compose_victim_loss(**vp.DRAIN)
         groups.append(("A  V_reentrancy_unstake + DRAIN", "A", V, drain, "Target.sol", "",
-                       {"original": V, "fix": S, "always_revert": always_revert(V)}))
+                       {"original": V, "fix": S, "always_revert": always_revert(V)}, None))
 
         results_file = RIG / "runs" / "spark-test-2.results.jsonl"
         patches_file = RIG / "runs" / "spark-test-2.patches.jsonl"
@@ -154,13 +225,25 @@ def main() -> int:
             groups.append(("B  spark-test-2 (StakingVault, arbiter-gpt exploit and patch)", "B",
                            ex["source"], ex["solidity"], "StakingVault.sol", solc,
                            {"original": ex["source"], "fix": fixed,
-                            "always_revert": always_revert(ex["source"])}))
+                            "always_revert": always_revert(ex["source"])}, None))
 
-        for title, key, source, solidity, cfile, solc, variants in groups:
+        row = one_file_row(root)
+        ex = exploit_from_row(row)
+        groups.append(("C  a one-file upload at solc 0.7.6 (--mode repo), through exploit_from_row",
+                       "C", BANK07, ex["solidity"], "Bank.sol", row["context"].get("solc") or "",
+                       {"original": BANK07, "fix": BANK07_FIX, "always_revert": BANK07_REVERT},
+                       ex["repo"]))
+
+        for title, key, source, solidity, cfile, solc, variants, repo in groups:
             t0 = time.monotonic()
-            proj, envs = build(key, source, solidity, cfile, root, solc)
-            a = " ".join("?" if e["A"] is None else f"{e['A'] / 1e18:g}" for e in envs)
             print(f"  {title}")
+            try:
+                proj, envs = build(key, source, solidity, cfile, root, solc, repo)
+            except RuntimeError as exc:
+                print(f"     [WRONG] {exc}\n")
+                results.extend([False] * (len(variants) + (key == "C")))
+                continue
+            a = " ".join("?" if e["A"] is None else f"{e['A'] / 1e18:g}" for e in envs)
             print(f"     honest baseline A (ETH) per env: {a}   "
                   f"[{REGRESSION_DIR}/, built in {time.monotonic() - t0:.1f}s]")
             for label, src in variants.items():
@@ -168,6 +251,17 @@ def main() -> int:
                 ok, marks = run_case(label, proj, cfile, src, root / f"{key}_cases")
                 print(f"     [{'OK  ' if ok else 'WRONG'}] {label:14s} {marks}  "
                       f"({time.monotonic() - t1:.1f}s)")
+                results.append(ok)
+            if key == "C":
+                # The patch gate on the same one-file repository: the fix passes, and check 4
+                # is "not applicable" (one file), not "skipped: not a Foundry project".
+                fx = verify_fix(source, solidity, patched=variants["fix"], root=root,
+                                sample_id="C_fix", repo=repo)
+                c4 = fx["checks"].get("4", {})
+                ok = (bool(fx["accepted"]) and c4.get("status") == "not_applicable"
+                      and repo.get("single_file") is True)
+                print(f"     [{'OK  ' if ok else 'WRONG'}] {'patch_gate':14s} accepted={fx['accepted']} "
+                      f"checks={ {n: c['status'] for n, c in fx['checks'].items()} }")
                 results.append(ok)
             print()
         print(f"{sum(results)}/{len(results)} as expected")

@@ -491,3 +491,65 @@ mechanism that is correct and unexpressible, and the templates need the work.
 Prediction on record: 14-20 of 35, failing mostly because the attack must precede the
 victim's entry, because no time passes between the attack and the victim's exit, and
 because of D4. A ceiling at or above 28 refutes that reading.
+
+## Soundness: compositions that made victim_loss pass on a correct contract (ME build)
+
+Everything above costs findings. These shipped false positives, which is worse: each is a
+composition that made the strict predicate pass against a contract with no flaw the attack
+used. Seven came from the ME-build review (predicate-soundness-1..7); fixing them found
+eight more. `scripts/soundness_probe.py` is the record: every attack case in it was
+ACCEPTED by forge at c4adaaf and is refused now (run the same file against c4adaaf and
+only the controls and the "checks off" acceptances come out as expected), and where a
+refusal has two layers the case runs again with the composition checks switched off, to
+show which layer holds on its own.
+
+| id | what passed on a correct contract | refused now by |
+|---|---|---|
+| 1 | token mode: a faucet gain "accounted" by depositing 1 wei into the target | the drain clause has no `tgtPost > tgtPre` exemption |
+| 2 | token mode: a mock token with no allowance check; a decoy spender the victim approved | victim-wallet outflow counts only up to the drop in the victim's allowance to the target (all of it when the target is the token); the victim may not approve agent code |
+| 3 | token_expr re-read at every measurement, switched by the attack | token and target fixed in storage when setup returns |
+| 4 | the owner's claim forwards what the stranger skimmed back to the owner | treasury_exit is exactly one call on `target` with plain arguments |
+| 5 | setup reads arbEoa out of `address(this).code`; also the victim getter called by selector, arbAtkEoa's old preimage rebuilt from two strings, the attacker contract's CREATE address | code-reading constructs refused in everything that can run before the attack; arbiterVictim() answers only after setup; arbAtkEoa drawn; the attacker created with CREATE2 under a drawn salt |
+| 6 | ether mode: the victim's value parked in an agent Bank; ether contention plus a drip | the ether-only trial has the drain clause too: the gain must leave the target during the attack |
+| 7 | attacker_code spoofs arbAsset() / arbTreasuryExit() / a TestArbiter contract, so a token proof was reported, patched and replayed as ether | units and the live replay read the harness's own TestArbiterVictim body (the last one, comments and strings blanked) |
+| X1 | the attacker calls the harness's arbSetup and redeploys the world under the victim | every harness frame is `arbFrame` (only the harness may call it); arbiterRun refuses re-entry |
+| X2 | an EOA attack reassigns `target`, so the victim's exit goes to an empty address | EOA attack_body may not write setup or harness state; the trial checks `target` is unchanged |
+| X5 | a second test contract in attacker_code: forge's any-[PASS] was read as the verdict | test functions refused in attacker_code; a victim_loss file runs only its own test |
+| X6 | deploy_code closes arbSetup and gives the harness (the vault's owner) a receive() | fragments must be balanced |
+| X7 | a later trial's setup reads an earlier attack's address from a recorder and appoints it | every trial starts from one EVM snapshot (which also ends env 2's accumulated warp) |
+| X8 | `target` is a look-alike the agent wrote, cast to the audited type | `target` may not hold an agent-written contract |
+| C9 | the victim names an agent-written deputy as its withdrawer; anyone drives the deputy | the victim may not pay, approve or pass along an agent-written contract |
+| X9 | a victim the attack paid out early counted as recovering nothing | recovery is the victim's wallet gain, whether or not its exit call succeeded |
+
+Cost, measured with no model: the 36 self-contained victim_loss proofs ever recorded as
+passed (reentrancy drains, plus the delegatecall-module and session-key proofs of
+me-strict-r1) were taken apart into their fragments and composed again: 36 of 36 still
+pass. The benchmark ceiling is unchanged at 8 of 35, the same eight samples; three
+reference victims that pay or approve an agent-written AMM are now refused at composition
+(they were `unharmed` before, so the bound does not move).
+
+Residual gaps, as precisely as we can state them:
+
+* The drawn accounts are still constants in the harness bytecode. What stops code that
+  runs before the attack from reading them is lexical: `.code` (other than `.code.length`),
+  `codecopy`, `extcodecopy`, `runtimeCode`, `getCode`, `getDeployedCode` and any
+  `TestArbiter*` name are refused, after comments and strings are blanked, in setup, the
+  victim's steps, the owner's claim, token_expr and all of attacker_code. We know of no
+  other way Solidity source reaches EXTCODECOPY or CODECOPY. Drawing the accounts at run
+  time instead needs a secret setup cannot read; the only one forge offers is its cheatcode
+  RNG, which would make a proof's accounts differ between the audit, the negation run, the
+  patch gate, the regression project and the ME evidence replay unless a per-proof fuzz
+  seed were carried through every one of them. Not done.
+* Agent-written contracts are judged statically where they meet the victim. An address
+  laundered past the check (kept in a plain `address`, read back from the target, computed
+  from a nonce) is not seen, so a victim can still be made to empower agent code that way.
+* Setup may still hand a role to an agent-written deputy that anyone can drive, for
+  example `target.setOwner(address(new Deputy()))`. This predates the ME build; the
+  name-based `_STANDING_RE` is the only check and it is partial. The identity draw stops
+  setup naming the attacker, not setup empowering a contract the attacker can call.
+* Token mode trusts the measured token. A token written in attacker_code that lies in
+  balanceOf or allowance (an adversarial mock, not a sloppy one) is not detected.
+* An EOA attack_body that writes a setup variable before declaring a local of the same
+  name reaches the state variable; the write check exempts names the body declares.
+* Recall, not soundness: a victim that approves type(uint256).max on a token that never
+  decreases an infinite allowance cannot have its wallet outflow counted.

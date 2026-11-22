@@ -143,6 +143,21 @@ def _copy_sol_tree(src: Path, dest: Path) -> None:
                     continue
 
 
+def _finding_poc(finding: dict[str, Any], every: list[dict[str, Any]],
+                 admissible: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The PoC a finding cites: the FIRST passed, adjudicated record of its name -- the rule
+    gate._finding_evidence and patch.exploit_from_row use. A name can repeat: a strict
+    re-proof that reuses the loose PoC's name is merged into the same row (run.py
+    run_strict_retry), and a name-to-PoC dict kept the LAST record, so the dump (rungs 2
+    and 3) took the retry's failed attempt, or the loose file behind a strict finding
+    (gate-logic-4). A name with no passed record falls back to its last record, as before."""
+    name = finding.get("poc_name")
+    named = [p for p in every if p.get("name") == name] if name else []
+    return (next((p for p in named if p.get("passed") and p.get("adjudicated")), None)
+            or (named[-1] if named else None)
+            or (admissible[0] if admissible else None))
+
+
 def dump_run(results_path: Path, out_dir: Path, include_failed: bool = False) -> dict[str, Any]:
     """Write every proven exploit to its own runnable project. Returns a manifest."""
     rows = [
@@ -158,19 +173,16 @@ def dump_run(results_path: Path, out_dir: Path, include_failed: bool = False) ->
         sample_id = row.get("sample_id", "unknown")
         outcome = row.get("outcome") or {}
         findings = outcome.get("findings") or []
-        pocs = {p.get("name"): p for p in (outcome.get("pocs") or [])}
+        every = outcome.get("pocs") or []
 
         # Only exploits the harness itself adjudicated as passing are evidence.
-        admissible = [
-            p for p in (outcome.get("pocs") or [])
-            if p.get("passed") and p.get("adjudicated")
-        ]
+        admissible = [p for p in every if p.get("passed") and p.get("adjudicated")]
         if not admissible and not include_failed:
             skipped += 1
             continue
 
         for finding in findings or [{}]:
-            poc = pocs.get(finding.get("poc_name")) or (admissible[0] if admissible else None)
+            poc = _finding_poc(finding, every, admissible)
             if poc is None:
                 continue
             name = poc.get("name", "Exploit")
@@ -549,7 +561,12 @@ def write_regression(proj: Path, *, source: str, contract_file: str, exploit_sol
     (proj / "src" / contract_file).write_text(source, encoding="utf-8")
     (test_dir / REGRESSION_FILE).write_text(
         regression_solidity(exploit_solidity, contract_file, environments), encoding="utf-8")
-    (test_dir / "Vm.sol").write_text(VM_SOL.replace("__PRAGMA__", ">=0.8.0"), encoding="utf-8")
+    # Vm.sol carries the exploit's own pragma, as the harness wrote it: below 0.8 the exploit
+    # declares >=0.6.0, and a >=0.8.0 Vm.sol next to it makes forge refuse the project with
+    # "Found incompatible versions" (sandbox-misc-1).
+    m = re.search(r"^\s*pragma\s+solidity\s+([^;]+);", exploit_solidity, re.MULTILINE)
+    (test_dir / "Vm.sol").write_text(
+        VM_SOL.replace("__PRAGMA__", m.group(1).strip() if m else ">=0.8.0"), encoding="utf-8")
     (proj / "foundry.toml").write_text(
         FOUNDRY_TOML.format(src="src", solc=f'solc = "{solc}"' if solc else "auto_detect_solc = true",
                             via_ir="false"),

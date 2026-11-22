@@ -8,6 +8,13 @@
 Results go to me.json next to gate.json (and runs/gate/web/<rid>.me.json with --rid), the
 sidecar the web result page reads (BRIEF 4.2). A patched child record is added to an existing
 sidecar under "patched" so the page's main card keeps describing the gate result itself.
+
+Nothing is sent when an --escrow-request could not be settled by the new record (wrong
+auditor, wrong source, closed, past its window). The sidecar is written right after the
+record is registered and again after each later step, with the steps still to do under
+"pending"; a step that fails is recorded there instead of aborting. Running the same command
+again picks up the same record (identical on-chain fields, same auditor) and does only the
+pending steps, so an interrupted run never registers a duplicate.
 """
 from __future__ import annotations
 
@@ -16,16 +23,21 @@ import datetime as _dt
 import json
 from pathlib import Path
 
+from . import abi
 from .build import Build
 from .chain import ChainError, Client, RpcError, format_mec
-from .contracts import LINK_LABELS, VERDICT_LABELS, Registry, revert_text, simulate
-from .record import WEB_DIR, RecordPlan, load_gate, plan_record
+from .contracts import (EVENT_LINKED, LINK_LABELS, RECORD_FIELDS, REQUEST_STATUS, REQUEST_STATUS_ZH, VERDICT_LABELS,
+                        Registry, revert_text, simulate)
+from .record import DIRTY_MARK, WEB_DIR, RecordPlan, load_gate, plan_record
 from .session import Session, add_network_args, open_session
 
 PUSH0_HINT = ("節點拒絕 PUSH0 指令（invalid opcode: PUSH0）：ME 測試網不支援 shanghai 以後的 EVM。"
               "請用 evm_version = \"paris\" 編譯（solc --evm-version paris；foundry.toml 設 evm_version = \"paris\"）。")
 REFUSAL_GAS = 400_000
 TZ = _dt.timezone(_dt.timedelta(hours=8))
+SETTLE_GRACE = 3600  # AuditEscrow.SETTLE_GRACE
+REGISTER_MARGIN = 60  # a new record must be mined before the request's deadline; leave a minute
+PENDING_REASON = "登錄後這一步還沒有完成（中斷時會停在這裡；重跑同一個指令會接著做，不會重複登錄）"
 
 
 def salt_for(rid: int) -> str:
@@ -100,10 +112,47 @@ def show_refusal(sess: Session, rid: int, build: Build | None, salt: str | None 
     return out
 
 
+# ------------------------------------------------------------------ escrow pre-check
+
+
+def check_escrow_request(sess: Session, req_id: int, plan: RecordPlan, record_id: int | None = None) -> dict:
+    """Raise before anything is sent when this record could not settle request `req_id`:
+    the same checks AuditEscrow.settle makes (open, named auditor, source hash, window)."""
+    esc = sess.escrow
+    if not esc:
+        raise ChainError("部署資訊裡沒有 AuditEscrow，無法結算委託")
+    q = esc.get(req_id)
+    if record_id is not None and q["status"] != 1 and q["recordId"] == record_id:
+        return q  # already settled by this record (an interrupted run); the settle step records it
+    problems = []
+    if q["status"] != 1:
+        problems.append(f"委託 #{req_id} 的狀態是「{REQUEST_STATUS_ZH.get(q['status'], q['status'])}」，不是等待稽核")
+    if sess.signer and q["auditor"].lower() != sess.signer.address.lower():
+        problems.append(f"委託指定的稽核者是 {q['auditor']}，不是送交易的帳號 {sess.signer.address}（只有它能結算）")
+    if q["sourceHash"].lower() != plan.input["sourceHash"].lower():
+        problems.append(f"委託的原始碼 sha256 是 {q['sourceHash']}，這筆紀錄是 {plan.input['sourceHash']}")
+    now = sess.client.block_timestamp()
+    if record_id is None:
+        if now + REGISTER_MARGIN > q["deadline"]:
+            problems.append("委託期限已到（或剩不到 1 分鐘），新登錄的紀錄不能結算它")
+    else:
+        rec = sess.registry.record(record_id)
+        if record_id < q["minRecordId"]:
+            problems.append(f"紀錄 #{record_id} 比委託早登錄")
+        if rec["timestamp"] > q["deadline"]:
+            problems.append(f"紀錄 #{record_id} 在委託期限之後才登錄")
+        if now > q["deadline"] + SETTLE_GRACE:
+            problems.append("已過結算期限（委託期限後 1 小時）")
+    if problems:
+        raise ChainError(f"委託 #{req_id} 不能用這筆紀錄結算，沒有送出任何交易：" + "；".join(problems))
+    return q
+
+
 # ------------------------------------------------------------------ sidecar (BRIEF 4.2)
 
 
-def sidecar(sess: Session, plan: RecordPlan, reg: dict | None, deploy: dict, escrow_req: dict | None) -> dict:
+def sidecar(sess: Session, plan: RecordPlan, reg: dict | None, deploy: dict, escrow_req: dict | None,
+            pending: list[str] | None = None) -> dict:
     net, inp = sess.net, plan.input
     record = None
     if reg:
@@ -112,11 +161,12 @@ def sidecar(sess: Session, plan: RecordPlan, reg: dict | None, deploy: dict, esc
                   "gateJsonHash": inp["gateJsonHash"], "exploitHash": inp["exploitHash"],
                   "patchHash": inp["patchHash"], "parentId": inp["parentId"], "auditor": reg["auditor"],
                   "model": inp["model"], "initcodeHash": inp["initcodeHash"], "toolCommit": inp["toolCommit"],
+                  "toolCommitSource": plan.tool.get("source"), "toolCommitDirty": bool(plan.tool.get("dirty")),
                   "cosmosTx": reg.get("cosmosTx")}
     dep = {k: deploy.get(k) for k in ("status", "reason", "address", "tx", "linkKind", "runtimeCodeHash", "cosmosTx")}
     dep["preflight"] = deploy.get("preflight")
     escrow = (sess.deployment or {}).get("escrow") or {}
-    return {
+    doc = {
         "schema": "arbiter-me/0.1", "network": net.name, "chainId": net.chain_id,
         "registry": sess.registry.address, "escrow": escrow.get("address"),
         "record": record, "deploy": dep, "escrow_request": escrow_req,
@@ -128,19 +178,30 @@ def sidecar(sess: Session, plan: RecordPlan, reg: dict | None, deploy: dict, esc
                      "files": [{"name": f["name"], "sha256": f["sha256"]} for f in plan.files]},
         "recordedAt": _dt.datetime.now(TZ).isoformat(timespec="seconds"),
     }
+    if pending:
+        doc["pending"] = list(pending)  # steps still to do for this record (a rerun does them)
+    return doc
+
+
+_PATCHED_KEYS = ("record", "deploy", "explorer", "evidence", "recordedAt", "escrow_request", "pending")
 
 
 def _merge_write(path: Path, doc: dict, patched: bool) -> Path:
-    if patched:
-        if path.exists():
+    base = None
+    if path.exists():
+        try:
             base = json.loads(path.read_text(encoding="utf-8"))
-            if base.get("registry") == doc["registry"]:
-                base["patched"] = {k: doc[k] for k in ("record", "deploy", "explorer", "evidence", "recordedAt")}
-                doc = base
-            else:
-                path = path.with_name(path.name.replace(".json", ".patched.json"))
+        except (json.JSONDecodeError, OSError):
+            base = None
+    if patched:
+        if base is not None and base.get("registry") == doc["registry"]:
+            base["patched"] = {k: doc[k] for k in _PATCHED_KEYS if k in doc}
+            doc = base
         else:
             path = path.with_name(path.name.replace(".json", ".patched.json"))
+    elif (base is not None and base.get("registry") == doc["registry"] and isinstance(base.get("patched"), dict)
+          and ((base.get("record") or {}).get("id") == (doc.get("record") or {}).get("id"))):
+        doc = {**doc, "patched": base["patched"]}  # rewriting the same record keeps its patched child
     path.write_text(json.dumps(doc, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     return path
 
@@ -153,6 +214,100 @@ def write_sidecars(doc: dict, plan: RecordPlan, web_dir: Path | None = None) -> 
         d = web_dir or WEB_DIR
         out.append(_merge_write(d / f"{plan.gate.rid}.me.json", doc, plan.patched))
     return out
+
+
+def _sidecar_parts(plan: RecordPlan, web_dir: Path | None) -> list[dict]:
+    """The sidecar sections an earlier run of this command wrote for this plan."""
+    paths = []
+    if plan.gate.path:
+        paths.append(plan.gate.path.parent / "me.json")
+    if plan.gate.rid:
+        paths.append((web_dir or WEB_DIR) / f"{plan.gate.rid}.me.json")
+    parts = []
+    for p in paths:
+        cands = [p.with_name(p.name.replace(".json", ".patched.json")), p] if plan.patched else [p]
+        for c in cands:
+            try:
+                doc = json.loads(c.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if plan.patched and c == p:
+                part = doc.get("patched") if isinstance(doc.get("patched"), dict) else None
+                if part:
+                    parts.append({**part, "registry": doc.get("registry"), "chainId": doc.get("chainId")})
+            else:
+                parts.append(doc)
+    return parts
+
+
+def resume_point(sess: Session, plan: RecordPlan, web_dir: Path | None = None) -> dict | None:
+    """An earlier run's sidecar section for exactly this record, with steps still pending: the
+    record on chain has the same twelve RecordInput fields and the signer is its auditor."""
+    for part in _sidecar_parts(plan, web_dir):
+        rec = part.get("record") or {}
+        if not (part.get("pending") and rec.get("id")):
+            continue
+        if str(part.get("registry") or "").lower() != sess.registry.address.lower() \
+                or part.get("chainId") != sess.net.chain_id:
+            continue
+        try:
+            onchain = sess.registry.record(int(rec["id"]))
+        except ChainError:
+            continue
+        if any(str(onchain[k]).lower() != str(plan.input[k]).lower() for k in RECORD_FIELDS):
+            continue
+        if sess.signer and onchain["auditor"].lower() != sess.signer.address.lower():
+            continue
+        return part
+    return None
+
+
+def _linked_tx(sess: Session, rid: int, address: str, since: int) -> str | None:
+    """The deployAudited transaction that linked `address` to record `rid` (logs read in
+    windows of at most 10,000 blocks from the record's registration time)."""
+    try:
+        start = sess.client.block_at_timestamp(since)
+        topics = [abi.topic(EVENT_LINKED), "0x" + int(rid).to_bytes(32, "big").hex(),
+                  "0x" + "00" * 12 + address.lower().removeprefix("0x")]
+        logs = sess.client.find_logs(sess.registry.address, topics, start, max_windows=20)
+        return logs[0]["transactionHash"] if logs else None
+    except ChainError:
+        return None
+
+
+def _deploy_step(sess: Session, plan: RecordPlan, reg: dict, register_only: bool, record_refusal: bool,
+                 pre: dict) -> dict:
+    v = plan.verdict
+    if register_only:
+        return {"status": "not_requested", "reason": "只登錄紀錄", "address": None, "tx": None, "linkKind": 0,
+                "runtimeCodeHash": None}
+    if v in (1, 2):
+        if not pre["ok"]:
+            return {"status": "failed", "reason": pre["error"], "address": None, "tx": None, "linkKind": 0,
+                    "runtimeCodeHash": None}
+        reg_c, rid = sess.registry, reg["id"]
+        predicted = reg_c.predict(rid, sess.require_signer().address, salt_for(rid)).lower()
+        if reg_c.deployment_of(predicted) == rid:  # an interrupted run already deployed it
+            rec = reg_c.record(rid)
+            tx = _linked_tx(sess, rid, predicted, rec["timestamp"])
+            return {"status": "deployed", "reason": "", "address": predicted, "tx": tx, "linkKind": 2,
+                    "runtimeCodeHash": sess.client.code_hash(predicted), "predicted": predicted,
+                    "salt": salt_for(rid), "cosmosTx": sess.client.cosmos_tx_hash(tx) if tx else None}
+        return deploy_through_registry(sess, rid, plan.build)
+    return show_refusal(sess, reg["id"], plan.build, record=record_refusal)
+
+
+def _settle_step(sess: Session, req_id: int, rid: int) -> dict:
+    from . import escrow  # late: the probe replaces escrow.settle to simulate a failure
+    q = sess.escrow.get(req_id)
+    if q["status"] != 1 and q["recordId"] == rid:  # an interrupted run already settled it
+        return {"id": req_id, "fee_wei": str(q["fee"]), "status": REQUEST_STATUS.get(q["status"], "?"),
+                "settleTx": None, "recordId": rid, "note": "上一次中斷的執行已經結算（交易雜湊沒有記下）"}
+    try:
+        return escrow.settle(sess, req_id, rid)
+    except ChainError as exc:
+        return {"id": req_id, "fee_wei": str(q["fee"]), "status": "open", "settleTx": None, "recordId": rid,
+                "settleError": str(exc)}
 
 
 # ------------------------------------------------------------------ CLI
@@ -203,41 +358,69 @@ def _run(sess: Session, args: argparse.Namespace, register_only: bool) -> int:
     pre = preflight(sess.client, plan.build.deploy_code, sender) if plan.build else \
         {"ok": False, "gas": None, "error": "沒有可編譯的 bytecode"}
 
+    prev = resume_point(sess, plan, args.web_dir)
+    prev_q = (prev or {}).get("escrow_request") or {}
+    settled_before = prev_q.get("id") == args.escrow_request and prev_q.get("status") in ("paid", "refunded")
+    if args.escrow_request and not settled_before:
+        # Refuse before anything is sent when the request could not be settled by this record.
+        check_escrow_request(sess, args.escrow_request, plan, int(prev["record"]["id"]) if prev else None)
+
     if args.dry_run:
         out = {"dryRun": True, "recordInput": plan.input, "preflight": pre, "bundle": str(plan.bundle),
-               "manifest": plan.manifest_sha256, "notes": plan.notes}
+               "manifest": plan.manifest_sha256, "notes": plan.notes, "toolCommitDirty": plan.tool.get("dirty")}
         print(json.dumps(out, ensure_ascii=False, indent=1) if args.json else _dry_text(sess, plan, pre))
         return 0
 
-    reg = register_record(sess, plan)
-    v = plan.verdict
-    if register_only:
-        deploy = {"status": "not_requested", "reason": "只登錄紀錄", "address": None, "tx": None, "linkKind": 0,
-                  "runtimeCodeHash": None}
-    elif v in (1, 2):
-        if not pre["ok"]:
-            deploy = {"status": "failed", "reason": pre["error"], "address": None, "tx": None, "linkKind": 0,
-                      "runtimeCodeHash": None}
-        else:
-            deploy = deploy_through_registry(sess, reg["id"], plan.build)
+    pre_out = {k: pre.get(k) for k in ("ok", "gas", "error")}
+    placeholder = {"status": "failed", "reason": PENDING_REASON, "address": None, "tx": None, "linkKind": 0,
+                   "runtimeCodeHash": None, "preflight": pre_out}
+    if prev:
+        r = prev["record"]
+        reg = {"id": int(r["id"]), "tx": r.get("tx"), "block": r.get("block"), "auditor": r.get("auditor"),
+               "cosmosTx": r.get("cosmosTx"), "resumed": True}
+        pending = [s for s in prev["pending"] if s in ("deploy", "settle")]
+        deploy = placeholder if "deploy" in pending else (prev.get("deploy") or placeholder)
+        escrow_req = prev.get("escrow_request") if settled_before else None
+        if args.escrow_request and not settled_before and "settle" not in pending:
+            pending.append("settle")
+        if not args.escrow_request and "settle" in pending:
+            pending.remove("settle")  # this run was not asked to settle anything
     else:
-        deploy = show_refusal(sess, reg["id"], plan.build, record=args.record_refusal)
-    deploy["preflight"] = {k: pre.get(k) for k in ("ok", "gas", "error")}
+        reg = register_record(sess, plan)
+        pending = ["deploy"] + (["settle"] if args.escrow_request else [])
+        deploy, escrow_req = placeholder, None
+    paths = write_sidecars(sidecar(sess, plan, reg, deploy, escrow_req, pending), plan, args.web_dir)
 
-    escrow_req = None
-    if args.escrow_request:
-        from .escrow import settle
-        escrow_req = settle(sess, args.escrow_request, reg["id"])
+    if "deploy" in pending:
+        try:
+            deploy = _deploy_step(sess, plan, reg, register_only, args.record_refusal, pre)
+            pending.remove("deploy")  # an outcome (deployed / blocked / a refusal the node explained)
+        except ChainError as exc:  # interrupted (RPC, cast, receipt timeout): stays pending
+            deploy = {"status": "failed", "reason": f"{exc}（紀錄已登錄；重跑同一個指令會再試這一步）", "address": None,
+                      "tx": None, "linkKind": 0, "runtimeCodeHash": None}
+        deploy["preflight"] = pre_out
+        paths = write_sidecars(sidecar(sess, plan, reg, deploy, escrow_req, pending), plan, args.web_dir)
 
-    doc = sidecar(sess, plan, reg, deploy, escrow_req)
-    paths = write_sidecars(doc, plan, args.web_dir)
+    if "settle" in pending:
+        escrow_req = _settle_step(sess, args.escrow_request, reg["id"])
+        if escrow_req["status"] in ("paid", "refunded"):
+            pending.remove("settle")
+        paths = write_sidecars(sidecar(sess, plan, reg, deploy, escrow_req, pending), plan, args.web_dir)
+
+    doc = sidecar(sess, plan, reg, deploy, escrow_req, pending)
     if args.json:
-        print(json.dumps({**doc,
+        print(json.dumps({**doc, "resumed": bool(prev),
                           "sidecars": [str(p) for p in paths], "bundle": str(plan.bundle),
                           "notes": plan.notes}, ensure_ascii=False, indent=1))
     else:
-        print(_summary(sess, plan, reg, deploy, escrow_req, paths))
-    return 0 if deploy["status"] in ("deployed", "blocked", "not_requested") else 1
+        print(_summary(sess, plan, reg, deploy, escrow_req, paths, pending))
+    done = deploy["status"] in ("deployed", "blocked", "not_requested")
+    return 0 if done and not pending else 1
+
+
+def _commit_line(plan: RecordPlan) -> str:
+    mark = f"（gate.json 記錄：產生結果的程式{DIRTY_MARK}）" if plan.tool.get("dirty") else ""
+    return f"  工具      commit {plan.input['toolCommit']}{mark}"
 
 
 def _dry_text(sess: Session, plan: RecordPlan, pre: dict) -> str:
@@ -246,6 +429,7 @@ def _dry_text(sess: Session, plan: RecordPlan, pre: dict) -> str:
              f"  判定      {inp['verdict']} {VERDICT_LABELS[inp['verdict']]}",
              f"  原始碼    sha256 {inp['sourceHash']}",
              f"  initcode  keccak256 {inp['initcodeHash']}",
+             _commit_line(plan),
              f"  preflight {'通過，約 ' + str(pre['gas']) + ' gas' if pre['ok'] else '失敗：' + str(pre['error'])}",
              f"  證據      {len(plan.files)} 個檔案，manifest sha256 {plan.manifest_sha256}"]
     lines += [f"  註：{n}" for n in plan.notes]
@@ -253,14 +437,15 @@ def _dry_text(sess: Session, plan: RecordPlan, pre: dict) -> str:
 
 
 def _summary(sess: Session, plan: RecordPlan, reg: dict, deploy: dict, escrow_req: dict | None,
-             paths: list[Path]) -> str:
+             paths: list[Path], pending: list[str] | None = None) -> str:
     net, inp = sess.net, plan.input
     lines = [f"ARBITER Gate × ME：{'修補後版本的' if plan.patched else ''}稽核紀錄已登錄  網路 {net.name}（chain {net.chain_id}）",
              f"  紀錄 #{reg['id']}  判定 {inp['verdict']}：{VERDICT_LABELS[inp['verdict']]}"
              + (f"（上一版 #{inp['parentId']}）" if inp["parentId"] else ""),
-             f"  登錄交易  {reg['tx']}"]
+             f"  登錄交易  {reg['tx']}" + ("（上一次執行登錄的；這次接著完成剩下的步驟，沒有重複登錄）" if reg.get("resumed") else "")]
     if url := net.tx_url(reg["tx"], reg.get("cosmosTx")):
         lines.append(f"            {url}")
+    lines.append(_commit_line(plan))
     st = deploy["status"]
     if st == "deployed":
         lines += [f"  部署      已由登錄合約部署稽核過的 bytecode：{deploy['address']}",
@@ -277,8 +462,16 @@ def _summary(sess: Session, plan: RecordPlan, reg: dict, deploy: dict, escrow_re
     else:
         lines.append("  部署      沒有要求部署")
     if escrow_req:
-        lines.append(f"  委託      #{escrow_req['id']} {escrow_req['status']}，{format_mec(int(escrow_req['fee_wei']))}"
-                     f"（交易 {escrow_req.get('settleTx')}）")
+        words = {"paid": "已付款給稽核者", "refunded": "已退款給委託人", "open": "還沒結算"}
+        lines.append(f"  委託      #{escrow_req['id']} {words.get(escrow_req['status'], escrow_req['status'])}，"
+                     f"{format_mec(int(escrow_req['fee_wei']))}"
+                     + (f"（交易 {escrow_req['settleTx']}）" if escrow_req.get("settleTx") else "")
+                     + (f"（{escrow_req['note']}）" if escrow_req.get("note") else ""))
+        if escrow_req.get("settleError"):
+            lines.append(f"            結算失敗：{escrow_req['settleError']}")
+    if pending:
+        lines.append(f"  未完成    {'、'.join({'deploy': '部署', 'settle': '結算委託'}.get(s, s) for s in pending)}"
+                     "：已記在 me.json，重跑同一個指令會接著做（不會重複登錄）")
     lines.append(f"  證據      {len(plan.files)} 個檔案（{plan.bundle.name}），manifest sha256 {plan.manifest_sha256}")
     lines += [f"  me.json   {p.name}" for p in paths]
     lines += [f"  註：{n}" for n in plan.notes]

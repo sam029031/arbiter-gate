@@ -20,6 +20,10 @@ and the ones that must not:
   strict_retry     synthetic: proven / not_proven / skipped strict retries
   novelty          synthetic: re-attack attempts with novelty badges, check 5 not_diverse
   units            synthetic: ERC-20 amounts with decimals and symbol, treasury TA/TB
+  units_markup     an older gate.json whose unit label is the AI-written token expression
+                   with an <img onerror> in it (web-security-wording-1): nothing of it reaches
+                   the result page (story, tables, re-measure, timeline: 「代幣」 instead), the PR
+                   comment table keeps its columns, parse_unit never stores an expression
   me_blocked       synthetic sidecar: ME testnet, blocked deploy, explorer link (Cosmos tx
                    hash route), verify link, no host path even when the sidecar carries one
   me_deployed      CREATE2 deploy, escrow paid with the settlement linked from its Cosmos hash;
@@ -47,7 +51,8 @@ and the ones that must not:
   home_verify      the home page links 「鏈上驗證（ME Network）」 to /verify
   verify_routes    /verify, its assets and /me/deployments/<net>.json serve files; traversal,
                    encoded dots, hidden files, symlinks out and unknown types are 404
-  wording          every page above: no bare 安全, CLEAR or 首創, no host path, balanced HTML
+  wording          every page above: no bare 安全, CLEAR or 首創, no host path, no mainland
+                   form 托管 (zh-TW 託管), balanced HTML
 
     python3 scripts/webui_probe.py [--sidecar runs/gate/web/<rid>.me.json] [--out DIR]
 
@@ -73,7 +78,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from arbiter import prgate, sarif, web, webui  # noqa: E402
+from arbiter import patch, prgate, sarif, units, web, webui  # noqa: E402
 from arbiter.verdict import LABELS, NOT_EXECUTED, PROVEN  # noqa: E402
 
 REAL_WEB = web.WEB
@@ -341,6 +346,41 @@ def synthetic_cases(d: Path) -> None:
           and "公庫受損（攻擊者多拿的 ≥ 公庫少掉的）" in t and t.count(">沒有量到<") == 1
           and webui.amount(1, {"token": "T", "decimals": 30}) == "0 T" and webui.amount(None, usdc) == "—")
     check("units", ok, "ERC-20 decimals/symbol, address shortened, treasury TA/TB judged by the same rule")
+
+    # web-security-wording-1: before parse_unit was fixed, a token without a plain symbol() got the
+    # AI-written token expression as its label; saved results still carry it. It is valid Solidity
+    # and evaluates to the real token, so the harness measured a real loss in it.
+    expr = 'bytes("<img src=x onerror=document.title=7777>").length > 0 ? address(token) : address(0)'
+    bad = {"token": expr, "decimals": 18}
+    rows = envs([(5 * 10**18, 0, 5 * 10**18)] * 4)
+    for r in rows:
+        r["unit"] = bad
+    write(d, "c5c5c5c5c5c5", saved([finding(
+        abg={"status": "measured", "label": "已重現（合成層）", "environments": rows},
+        patch={"status": "verified", "label": "修補已通過驗證（針對此攻擊）", "origin": "repair", "changed_lines": 1,
+               "rationale": "probe", "diff": "", "gate_checks": {}, "after": copy.deepcopy(rows),
+               "timeline": [{"side": "attack", "source": "audit", "round": 1, "result": "proven", "abg": rows,
+                             "finding": {}}]})]))
+    t = render("c5c5c5c5c5c5")
+    raw = re.sub(r"<(script|style)\b.*?</\1>", "", t, flags=re.S)
+    tags = re.findall(r"<(\w+)", raw)
+    pipe = {"token": "address(t) | x", "decimals": 18}
+    table = prgate._abg_table([{**rows[0], "unit": pipe}, {**rows[1], "unit": bad}])
+    cols = {ln.count("|") for ln in table}
+    unit_line = 'ArbiterUnit(6 [6e0], "USDC")'
+    ok = ("onerror" not in t and "<img" not in t and "img" not in tags and expr not in t
+          and webui.esc(expr) not in t and "token)" not in text_of(t)
+          and "5 代幣" in text_of(t) and t.count("5 代幣") >= 16  # story, bars, 4 scenarios, re-measure, timeline
+          and webui.amount(5, {"token": "<b>x</b>", "decimals": 0}) == "5 代幣"
+          and webui.amount(5, {"token": "USDC", "decimals": 0}) == "5 USDC"
+          and len(cols) == 1 and "address(t)" not in "".join(table) and "<img" not in "".join(table)
+          and units.unit_name(bad) == "token" and units.unit_name({"token": "HOOK"}) == "HOOK"
+          and units.format_amount(5 * 10**18, bad, zh=True) == "5 token"
+          and patch.parse_unit("", expr) == {"token": None, "decimals": None}
+          and patch.parse_unit(unit_line, expr) == {"token": "USDC", "decimals": 6}
+          and patch.parse_unit('ArbiterUnit(18, "Wrapped Ether")', expr) == {"token": None, "decimals": 18})
+    check("units_markup", ok, f"expression label never printed ({t.count('5 代幣')}x 「5 代幣」, img tags "
+          f"{tags.count('img')}), PR table columns {sorted(cols)}, parse_unit keeps symbols only")
 
     web.WEB = REAL_WEB
 
@@ -659,7 +699,7 @@ def wording() -> None:
         page_text = re.sub(r"<(script|style)\b.*?</\1>", "", t, flags=re.S)
         if "安全" in page_text.replace("不等於安全", ""):
             problems.append(f"{name}: 安全")
-        for word in ("CLEAR", "首創", "/home/", "/mnt/c", "C:\\Users"):
+        for word in ("CLEAR", "首創", "/home/", "/mnt/c", "C:\\Users", "托管"):
             if word in page_text:
                 problems.append(f"{name}: {word}")
         problems += [f"{name}: {x}" for x in balanced(t)[:2]]

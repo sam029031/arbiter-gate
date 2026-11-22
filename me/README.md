@@ -60,7 +60,7 @@ ME 測試網連線資訊：EVM JSON-RPC `https://beta-hub-8545.explorer-testnet.
 ### 4.1 新增：ME Network 鏈上層（`me/`）
 
 - `AuditRegistry`、`AuditEscrow` 兩個合約，45 個 Foundry 測試（含 fuzz、重入、CREATE2 碰撞、搶先部署、搶占連結）。兩個合約都經過四個角度的對抗式審查，每個問題都先寫成會失敗的測試再修（v2）。
-- `arbiter_me/`：從 gate.json 產生紀錄與可重現的證據資料夾、登記、經由閘門部署、驗證（`--evidence`、`--rebuild`、`--replay`）、托管、0x ↔ me1 位址換算、ME 區塊瀏覽器的 Cosmos 雜湊換算；只用 Python 標準函式庫＋Foundry。
+- `arbiter_me/`：從 gate.json 產生紀錄與可重現的證據資料夾、登記、經由閘門部署、驗證（`--evidence`、`--rebuild`、`--replay`）、託管、0x ↔ me1 位址換算、ME 區塊瀏覽器的 Cosmos 雜湊換算；只用 Python 標準函式庫＋Foundry。
 - `web/verify/`：靜態驗證頁（桌機與手機），讀 ME 測試網或本機 anvil。
 - 網頁結果頁新增「鏈上紀錄」卡片（判定 → 鏈上拒絕部署 → 修補 → 部署的時間軸）；本機網頁可直接開 `/verify`。
 - `scripts/me_live_demo.sh`：一行指令在 ME 測試網完成整個示範，並寫出 `EVIDENCE.md`；`scripts/me_registry_probe.py`：在本機鏈上把同樣流程跑一遍的端到端檢查（54 項，含實鏈示範的排練）。
@@ -70,13 +70,14 @@ ME 測試網連線資訊：EVM JSON-RPC `https://beta-hub-8545.explorer-testnet.
 
 | 問題（決賽或這次審查時發現） | 改了什麼 | 檢查 |
 |---|---|---|
-| 「換手法再攻擊」只是在提示裡要求 AI 換，系統沒檢查；決賽 5 次再攻擊中 3 次其實是同一招 | 系統用 forge 執行軌跡比對攻擊路徑（進入點、重入、回呼…）；同一招不算換手法（`not_diverse`），還會帶著修補內容與上一招的指紋再要求一次 | `technique_probe` 12/12 |
+| 「換手法再攻擊」只是在提示裡要求 AI 換，系統沒檢查；決賽（arbiter-gpt）5 次再攻擊中 3 次其實是同一招 | 系統用 forge 執行軌跡比對攻擊路徑（進入點、重入、回呼…）；同一招不算換手法（`not_diverse`），還會帶著修補內容與上一招的指紋再要求一次 | `technique_probe` 12/12 |
 | AI 常用寬鬆條件（攻擊者獲利）證實，沒有損失表、修補與回歸測試 | 寬鬆條件證實後，自動要求 AI 改用嚴格條件（受害者損失＋守恆）再證明一次；成功就用嚴格的那一份做損失表與修補 | `strict_retry_probe` 13/13 |
 | 工具說明只列舊的寬鬆條件、不檢查 AI 用了哪個條件、缺條件時默默當成寬鬆條件 | 說明、可用清單與實際檢查改成同一份清單，嚴格條件排第一；清單外或缺漏一律拒絕 | `predicate_surface_probe` 16/16 |
-| **判定漏洞（這次發現）**：EOA 模式下，設定程式可以直接使用框架內部的受害者／攻擊者帳戶名稱，把擁有權交給攻擊者，安全的合約也會被判「攻擊成立」 | 設定程式與受害者步驟不能使用框架帳戶；否定檢查（把攻擊拿掉後必須失敗）擴大到 EOA 模式 | `eoa_identity_probe` 16/16 |
+| **判定漏洞（這次發現）**：EOA 模式下，設定程式可以直接使用框架內部的受害者／攻擊者帳戶名稱，把擁有權交給攻擊者，沒有這個漏洞的合約（例如已修好的版本）也會被判「攻擊成立」 | 設定程式與受害者步驟不能使用框架帳戶；否定檢查（把攻擊拿掉後必須失敗）擴大到 EOA 模式 | `eoa_identity_probe` 16/16 |
 | 嚴格條件只看一個一般使用者、只算 ETH：協議公庫被盜、ERC20 被盜都證實不了 | 加入「協議公庫當受害者」與 ERC20 版的受害者損失，仍要求守恆；捐款、搶先、擁有者正常提領等誤判情境都有反例 | `treasury_probe` 29/29 |
 | 沙箱只有 solc 0.8.20／0.8.37，固定版本（如 `pragma solidity 0.8.24;`）的合約都變「無法判定」 | 新沙箱映像檔內含 0.6.12、0.7.6、0.8.0～0.8.37（逐一核對官方雜湊）；缺版本時用中文說明原因 | `sandbox_solc_probe` 7/7 |
-| 結果頁：重現失敗顯示成「沒有受損」；沒有修補也寫「參考下方的修補」；「受害者受損」只看 B < A；英文內部訊息露出；回放結果頁沒有錄製日期 | 依實際狀態顯示「沒有量到」「重現失敗」與原因；建議文字依有沒有通過驗證的修補而定；標籤反映守恆規則；內部訊息翻成中文或收進技術細節 | `webui_probe` 24/24 |
+| 結果頁：重現失敗顯示成「沒有受損」；沒有修補也寫「參考下方的修補」；「受害者受損」只看 B < A；英文內部訊息露出；回放結果頁沒有錄製日期 | 依實際狀態顯示「沒有量到」「重現失敗」與原因；建議文字依有沒有通過驗證的修補而定；標籤反映守恆規則；內部訊息翻成中文或收進技術細節 | `webui_probe` 25/25 |
+| **這次審查發現**：驗證頁把網址參數指定的節點（`?rpc=`）或合約（`?registry=`、`?escrow=`）當成官方部署顯示，連「✓」稽核者都照給；結果頁把 AI 寫的代幣運算式當成金額單位、沒有跳脫就印出（可以插入程式碼） | 官方部署＝頁面內建（或部署紀錄檔列出）的節點＋部署紀錄檔裡的 AuditRegistry＋鏈上程式碼雜湊相符；其他來源在頁首和每個畫面標「非官方來源」、不給「✓」，程式碼不是 AuditRegistry 的合約完全不讀；單位只顯示代幣符號或地址，一律跳脫 | 驗證頁 node 測試 48/48、瀏覽器檢查 35/35；`webui_probe` 25/25 |
 
 既有的合併檢查（8 個完整性 probe、patch、regression、mcp、repo_patch、reattack、project_upload、liveness_patch、live_drain、playback_date、diffscan、pr_gate、action_fork）全部照舊通過。改動的核心檔案（agent.py、tools.py、workspace.py、run.py、patch.py、gate.py）與原因，逐項寫在 commit 訊息裡；`innoserve/README.md` 裡「判定核心沒改」的雜湊表只適用於決賽版。
 
@@ -105,7 +106,7 @@ ME 測試網連線資訊：EVM JSON-RPC `https://beta-hub-8545.explorer-testnet.
 git clone --branch me-hackathon https://github.com/sam029031/arbiter-gate.git && cd arbiter-gate
 export PATH=$HOME/.foundry/bin:$PATH
 (cd me/contracts && forge test)                       # 合約測試 45 個
-python3 me/scripts/me_registry_probe.py                # 本機鏈端到端：登記 → 拒絕部署 → 修補 → 部署 → 驗證 → 托管
+python3 me/scripts/me_registry_probe.py                # 本機鏈端到端：登記 → 拒絕部署 → 修補 → 部署 → 驗證 → 託管
 python3 me/me.py verify <合約位址或紀錄編號> --network me-testnet --replay   # 直接驗證 ME 上的紀錄
 cd arbiter && python3 -m arbiter.web --port 8765       # 網頁介面；開 http://127.0.0.1:8765/verify
 ```
@@ -121,6 +122,7 @@ cd arbiter && python3 -m arbiter.web --port 8765       # 網頁介面；開 http
 - **紀錄是稽核者的主張，不是事實。** 合約保證的是：紀錄不會被改、內容自我一致、誰登記的、部署出去的就是稽核過的 bytecode。判定對不對，要靠證據重算與重跑；驗證頁和 `me.py verify` 就是為此而做。
 - **判定 1 是「沒有找到可證明的攻擊」，不等於安全。** 通過修補檢查只代表擋住了這一次證實的攻擊。
 - 任何人都能登記紀錄；讀者要自己決定信任哪些稽核者位址（`deployments/*.json` 的 `auditors` 名單只是部署者的背書）。`linkDeployment` 是稽核者自己的宣告，只能比對程式碼雜湊；`deployAudited` 才證明部署內容。
+- 驗證頁只替一件事背書：經由頁面內建的 ME RPC（或部署紀錄檔列出的節點）讀到、部署紀錄檔裡的那一個 AuditRegistry，而且鏈上程式碼雜湊和紀錄相同。連結裡的 `?rpc=`、`?registry=`、`?escrow=` 都可能是別人的節點或仿冒的合約，頁面會標成「非官方來源」、不顯示「✓」。
 - 範圍：EVM、Solidity、Foundry；AI 寫的攻擊程式在不能上網、唯讀的容器裡執行；只有「已證實可攻擊」才擋部署。ME 上的示範是測試網。
 
 ## 8. 檔案地圖

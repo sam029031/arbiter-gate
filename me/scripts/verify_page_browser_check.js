@@ -10,6 +10,11 @@
 // answers eth_getLogs like ME does (at most 10,000 blocks per query), so the page's windowed log
 // search is exercised; a second one (the next port) reports chain id 400 and swaps in the hash of
 // a real ME transaction, so the page's live Hub lookup and explorer links are exercised too.
+// Two more (the ports after) are nodes a crafted link could name: one claims to be ME (chain id
+// 400) and one is just another URL for the same anvil. With them and the fixture's "spoof"
+// contracts, the spoof cases check that a node, registry or escrow from the URL is never shown as
+// the official deployment (web-security-wording-2..4): a warning on the page and in the header,
+// no "✓" auditor badge, and a registry whose code is not AuditRegistry's is not read at all.
 // Each case loads a deep link, waits until nothing is loading, then checks the visible text,
 // element counts, that the page did not log errors, and that nothing is wider than the viewport.
 // The ME cases are live and read-only (--no-me skips them). Prints "N of M".
@@ -98,8 +103,9 @@ async function launch() {
  * JSON-RPC proxy to anvil. cap: refuse eth_getLogs over more than LOG_SPAN blocks, like ME.
  * asMe: {txHash}: report chain id 400 and give every log the transaction hash of a real ME
  * transaction, so the page (as on ME) looks it up on the live Hub and links the explorer.
+ * chainId: report this chain id and pass everything else through (a node that lies about its chain).
  */
-function rpcProxy(target, port, { cap = false, asMe = null } = {}) {
+function rpcProxy(target, port, { cap = false, asMe = null, chainId = null } = {}) {
   const stats = { rejected: 0 };
   const cors = { "access-control-allow-origin": "*", "access-control-allow-headers": "content-type",
                  "access-control-allow-methods": "POST, OPTIONS" };
@@ -115,6 +121,7 @@ function rpcProxy(target, port, { cap = false, asMe = null } = {}) {
         res.end(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }));
       };
       if (asMe && msg.method === "eth_chainId") return reply("0x190");
+      if (chainId && msg.method === "eth_chainId") return reply(chainId);
       if (asMe && msg.method === "eth_getLogs") {
         const logs = JSON.parse(await upstream(body)).result || [];
         return reply(logs.map((lg) => ({ ...lg, transactionHash: asMe.txHash })));
@@ -176,6 +183,9 @@ async function runCase(cdp, c, errors) {
   await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: c.scheme || "dark" }] });
   errors.length = 0;
   const before = c.before ? await c.before() : null;
+  // noEthers: the CDN script is blocked, as on a network that cannot reach cdnjs
+  await cdp.send("Network.setBlockedURLs", { urls: c.noEthers ? ["*cdnjs.cloudflare.com*"] : [] });
+  await cdp.send("Network.setCacheDisabled", { cacheDisabled: !!c.noEthers });
   await cdp.send("Page.navigate", { url: c.url });
   let last = "", stable = 0;
   for (let i = 0; i < 160 && stable < 3; i++) {
@@ -195,10 +205,13 @@ async function runCase(cdp, c, errors) {
     if (got !== n) problems.push(`${sel}: ${got} element(s), expected ${n}`);
   }
   if (c.extra) problems.push(...(await c.extra(cdp, before)));
-  if (!(await cdp.eval("!!(window.ethers && window.ethers.keccak256)"))) problems.push("ethers (cdnjs, SRI) did not load");
+  const hasEthers = await cdp.eval("!!(window.ethers && window.ethers.keccak256)");
+  if (!hasEthers && !c.noEthers) problems.push("ethers (cdnjs, SRI) did not load");
+  if (hasEthers && c.noEthers) problems.push("ethers loaded although cdnjs was blocked");
   const ov = await cdp.eval(OVERFLOW);
   if (ov.scrollWidth > ov.width || ov.bad.length) problems.push(`horizontal overflow at ${width}px: ${JSON.stringify(ov)}`);
-  const errs = errors.filter((e) => !/deployments\/[\w-]+\.json/.test(e)); // missing deployment files are expected 404s
+  const errs = errors.filter((e) => !/deployments\/[\w-]+\.json/.test(e) // missing deployment files are expected 404s
+    && !(c.noEthers && /cdnjs|ERR_BLOCKED/.test(e)));
   if (errs.length) problems.push(`console errors: ${errs.slice(0, 3).join(" | ")}`);
   if (OUT && c.shot) {
     const h = Math.min(await cdp.eval("document.documentElement.scrollHeight"), 9000);
@@ -215,8 +228,15 @@ async function main() {
   const proxy = await rpcProxy(FX.rpc, PROXY_PORT, { cap: true });
   const sample = has("no-me") ? null : await sampleMeTx();
   const meProxy = sample ? await rpcProxy(FX.rpc, PROXY_PORT + 1, { asMe: { txHash: sample.evm } }) : null;
+  const fakeMe = await rpcProxy(FX.rpc, PROXY_PORT + 2, { chainId: "0x190" });
+  const elsewhere = await rpcProxy(FX.rpc, PROXY_PORT + 3);
   const q = (o, rpc = FX.rpc) => BASE + "?" + new URLSearchParams({ rpc, ...o }).toString();
-  const r = FX.records, tx = FX.tx, d = FX.deployed;
+  const r = FX.records, tx = FX.tx, d = FX.deployed, sp = FX.spoof;
+  // the same page served next to a deployment file that declares the fixture's contracts as ME testnet
+  const SIM = new URL(sp.simBase, BASE).href;
+  const sim = (o) => SIM + "?" + new URLSearchParams(o).toString();
+  const ME_RPC = "https://beta-hub-8545.explorer-testnet.me";
+  const official = { "#net-pill.ok": 1, ".trustcard": 0, "#trust:not([hidden])": 0 };
   const T = (hash) => `[data-tx="${hash.toLowerCase()}"]`;
   const github = 'a[href^="https://github.com/sam029031/arbiter-gate/commit/"]';
   const capped = { before: async () => proxy.stats.rejected,
@@ -231,7 +251,7 @@ async function main() {
                "後續：重新稽核", `同一位稽核者之後對同一份原始碼登錄了較新的紀錄 #${r.reaudit}`, "可結算的紀錄",
                `cast receipt ${tx.register1.toLowerCase()} --rpc-url ${FX.rpc}`],
       reject: ["和鏈上雜湊不符", "讀取失敗", "manifest.json 的格式不是"],
-      selector: { ".timeline .step": 4, [T(tx.register1)]: 1, [T(tx.settle1)]: 1 } },
+      selector: { ".timeline .step": 4, [T(tx.register1)]: 1, [T(tx.settle1)]: 1, ...official } },
     { name: "patched child: two gated deployments, record.py bundle, a dispute by another account", url: q({ record: r.patched }),
       shot: "record2_desktop.png",
       expect: ["未發現可證明攻擊（不等於安全）", "由 AuditRegistry 依稽核過的 bytecode 部署", "共 2 個地址",
@@ -276,11 +296,51 @@ async function main() {
     { name: "unknown record id", url: q({ record: 99 }), expect: ["沒有紀錄 #99", "目前共有 6 筆紀錄"] },
     { name: "malformed deep link is reported, not used", url: q({ address: "0x12", record: 1 }),
       expect: ["address 參數不是地址", "已證實可攻擊（擋部署）"] },
+    // spoof cases (web-security-wording-2..4): a node, registry or escrow from the URL
+    { name: "spoof: a node claiming to be ME does not get the official deployment file or auditor list",
+      url: sim({ rpc: fakeMe.url, record: r.proven }), shot: "spoof_me_node.png",
+      expect: ["使用網址指定的節點時，要另外指定 AuditRegistry", "不是頁面內建或部署紀錄檔列出的官方節點", "非官方來源"],
+      reject: ["✓ 示範稽核者", "ME 測試網（自訂 RPC）", "已證實可攻擊（擋部署）"],
+      selector: { "#net-pill.ok": 0, ".trustcard": 1, "#trust:not([hidden])": 1, ".record": 0 } },
+    { name: "spoof: that node with the registry and escrow in the URL: unverified, no badge, cast asks the real ME node",
+      url: sim({ rpc: fakeMe.url, registry: FX.registry, escrow: FX.escrow, record: r.proven }), shot: "spoof_me_node_record.png",
+      expect: ["自訂 RPC（chainId 400）", "不是頁面內建或部署紀錄檔列出的官方節點", "非官方來源：不比對稽核者清單",
+               `cast receipt ${tx.register1.toLowerCase()} --rpc-url ${ME_RPC}`],
+      reject: ["✓ 示範稽核者", "ME 測試網（自訂 RPC）", `--rpc-url ${fakeMe.url}`],
+      selector: { "#net-pill.ok": 0, ".trustcard": 1, ".record.tone-mute": 1, ".verdict .unv": 1 } },
+    { name: "spoof: another URL for the same chain is not the deployment file's node",
+      url: q({ record: r.proven }, elsewhere.url),
+      expect: ["使用網址指定的節點時，要另外指定 AuditRegistry"], reject: ["✓ 示範稽核者", "已證實可攻擊（擋部署）"],
+      selector: { "#net-pill.ok": 0, ".trustcard": 1 } },
+    { name: "spoof: a registry in the URL whose code is not AuditRegistry's is not read at all",
+      url: q({ registry: sp.fakeRegistry, record: sp.fakeRecord }), shot: "spoof_fake_registry.png",
+      expect: ["這個地址上的合約不是 AuditRegistry", "頁面不讀取它的任何資料", "改用官方設定查看"],
+      reject: ["未發現可證明攻擊（不等於安全）", "✓ 示範稽核者"],
+      selector: { "#net-pill.bad": 1, ".trustcard": 1, ".record": 0, ".recitem": 0, ".verdict": 0 } },
+    { name: "spoof: another genuine AuditRegistry in the URL is shown, but not as the official deployment",
+      url: q({ registry: sp.otherRegistry, escrow: sp.otherEscrow, record: sp.otherRecord }),
+      expect: ["未發現可證明攻擊（不等於安全）", "由網址指定，不是官方部署紀錄檔裡的合約", "程式碼和官方 AuditRegistry 相同",
+               "非官方來源：不比對稽核者清單", "已付給稽核者"],
+      reject: ["✓ 示範稽核者", "不在部署紀錄的稽核者清單", "ARBITER Gate 公開 repo 的這個 commit"],
+      selector: { "#net-pill.ok": 0, ".trustcard": 1, ".verdict .unv": 0, "#trust:not([hidden])": 1 } },
+    { name: "spoof: an escrow in the URL beside the official registry is ignored",
+      url: q({ escrow: sp.fakeEscrow, record: r.patched }),
+      expect: ["沒有付費託管申請由這筆紀錄結算", "官方部署只讀部署紀錄檔裡的 AuditEscrow"],
+      reject: ["500 ETH", "bEEF"], selector: official },
+    { name: "no keccak256 (cdnjs blocked): the code hash cannot be checked, so not shown as the official deployment",
+      url: q({ record: r.proven }), noEthers: true,
+      expect: ["瀏覽器沒有載入 keccak256 函式庫", "非官方來源：不比對稽核者清單", "已證實可攻擊（擋部署）"],
+      reject: ["✓ 示範稽核者"], selector: { "#net-pill.ok": 0, ".trustcard": 1, ".verdict .unv": 1 } },
+    { name: "spoof: a fake escrow beside another genuine registry is ignored",
+      url: q({ registry: sp.otherRegistry, escrow: sp.fakeEscrowOther, record: sp.otherRecord }),
+      expect: ["的程式碼和官方 AuditEscrow 不同，已忽略"], reject: ["500 ETH", "bEEF"],
+      selector: { ".trustcard": 1 } },
+    // the capping proxy is a node the deployment file does not name, so the contracts are given in the URL
     { name: "node capping eth_getLogs at 10,000 blocks: record 1 still finds its transactions",
-      url: q({ record: r.proven }, proxy.url), ...capped,
-      expect: ["已付給稽核者", "證據包和鏈上紀錄相符"], selector: { [T(tx.register1)]: 1, [T(tx.settle1)]: 1 } },
+      url: q({ record: r.proven, registry: FX.registry, escrow: FX.escrow }, proxy.url), ...capped,
+      expect: ["已付給稽核者", "證據包和鏈上紀錄相符"], selector: { [T(tx.register1)]: 1, [T(tx.settle1)]: 1, ".trustcard": 1 } },
     { name: "node capping eth_getLogs at 10,000 blocks: record 2 finds both deployments",
-      url: q({ record: r.patched }, proxy.url), ...capped,
+      url: q({ record: r.patched, registry: FX.registry, escrow: FX.escrow }, proxy.url), ...capped,
       selector: { [T(tx.register2)]: 1, [T(tx.deploy2a)]: 1, [T(tx.deploy2b)]: 1, ".dep .check.ok": 2 } },
     { name: "mobile 390: proven record", url: q({ record: r.proven }), width: 390, shot: "record1_mobile.png",
       expect: ["證據包和鏈上紀錄相符"] },
@@ -289,6 +349,9 @@ async function main() {
     { name: "mobile 390: claimed address", url: q({ address: d.claimed }), width: 390, shot: "claimed_mobile.png",
       expect: ["稽核者自行宣告（未經閘門部署，只能比對程式碼雜湊）"] },
     { name: "mobile 375: home", url: q({}), width: 375, shot: "home_mobile.png", expect: ["最近的紀錄"] },
+    { name: "mobile 390: a spoofed node's record keeps the warning in view (light)", width: 390, scheme: "light",
+      url: sim({ rpc: fakeMe.url, registry: FX.registry, escrow: FX.escrow, record: r.patched }), shot: "spoof_mobile_light.png",
+      expect: ["非官方來源", "AuditRegistry 部署（未驗證）"], selector: { "#trust:not([hidden])": 1, ".trustcard": 1, ".step.unv": 1 } },
   ];
   if (!has("no-me")) {
     cases.push(
@@ -299,11 +362,13 @@ async function main() {
       { name: "ME explorer links (live Hub): transactions by Cosmos hash, accounts by me1 address",
         url: BASE + "?" + new URLSearchParams({ rpc: meProxy.url, registry: FX.registry, escrow: FX.escrow, record: r.proven }),
         shot: "record1_me_links.png",
-        expect: ["ME 測試網（自訂 RPC）", "在區塊瀏覽器查看", `Cosmos 交易 ${sample.cosmos.slice(0, 6)}`],
-        reject: ["區塊瀏覽器查不到", "這條鏈沒有區塊瀏覽器"],
+        expect: ["自訂 RPC（chainId 400）", "非官方來源", "在區塊瀏覽器查看", `Cosmos 交易 ${sample.cosmos.slice(0, 6)}`],
+        reject: ["區塊瀏覽器查不到", "這條鏈沒有區塊瀏覽器", "ME 測試網（自訂 RPC）"],
         selector: { [`a[href="https://www.explorer-testnet.me/zh-TW/transactions/${sample.cosmos.toUpperCase()}?netType=hub"]`]: 2,
                     [`a[href="https://www.explorer-testnet.me/zh-TW/blocks/${sample.height}?netType=hub"]`]: 2,
-                    'button[aria-label^="複製 cast 驗證指令：cast receipt "]': 2 },
+                    'button[aria-label^="複製 cast 驗證指令：cast receipt "]': 2,
+                    // the self-check asks ME's own node, not the one the link named
+                    [`button[aria-label$="--rpc-url ${ME_RPC}"]`]: 2 },
         extra: async (cdp) => {
           const hrefs = await cdp.eval(`[...document.querySelectorAll('#result a[href*="/accountDetails/"]')].map((a) => a.href)`);
           const ok = hrefs.length >= 3 && hrefs.every((u) => /^https:\/\/www\.explorer-testnet\.me\/zh-TW\/accountDetails\/me1[02-9ac-hj-np-z]{38}$/.test(u));
@@ -334,6 +399,7 @@ async function main() {
   await cdp.send("Page.enable");
   await cdp.send("Runtime.enable");
   await cdp.send("Log.enable");
+  await cdp.send("Network.enable");
   let passed = 0;
   for (const c of cases) {
     let problems;
@@ -343,8 +409,7 @@ async function main() {
   }
   console.log(`${passed} of ${cases.length} browser checks passed (capped proxy refused ${proxy.stats.rejected} whole-range queries)`);
   proc.kill();
-  proxy.server.close();
-  if (meProxy) meProxy.server.close();
+  for (const p of [proxy, meProxy, fakeMe, elsewhere]) if (p) p.server.close();
   try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) { /* chrome may still hold it */ }
   process.exit(passed === cases.length ? 0 : 1);
 }

@@ -13,8 +13,16 @@ contracts (me/dogfood/*.gate.json). Scenarios:
     (LINK_CLAIMED), AuditEscrow deployed through the registry (LINK_GATED) and used for the
     escrow request/settle; interrupted and resumed, rerun, deployments from a run without
     dogfood, an escrow audit that may not be gated, too little MEC; input resolution
+  - review findings me-tools-1..13 (hardening): the replay sandbox (a bundle's own
+    regression.zip with ffi is never run; an anchored exploit cannot use ffi, files, the
+    caller's environment or the network; a forged zip is reported; no solc preinstalled), the
+    gate.json cross-check (verdict 1 over a proven gate.json), a patched record with an extra
+    backdoor, escrow pre-check and resumable deploy/register, verify of a second gated
+    deployment, CRLF sources, the escrow help text, a dirty tool commit, the keystore password
+    file on SIGTERM/SIGHUP/SIGINT, and logs behind a node that caps eth_getLogs at 10,000 blocks
   - read-only against the ME testnet RPC: preflight with paris passes, shanghai -> PUSH0
 Prints one line per check and "N of M" at the end. --offline skips the ME RPC checks.
+Ports: anvil on --port, a local listener on --port+5, the capped-log proxy on --port+6.
 
     python3 me/scripts/me_registry_probe.py [--port 8720] [--offline] [--keep]
 """
@@ -22,15 +30,21 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import http.server
 import io
 import json
 import os
+import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
+import urllib.request
+import zipfile
 from pathlib import Path
 
 ME = Path(__file__).resolve().parent.parent
@@ -38,13 +52,18 @@ sys.path.insert(0, str(ME))
 
 import me as me_cli  # noqa: E402
 from arbiter_me import abi, demo  # noqa: E402
+from arbiter_me import build as build_mod  # noqa: E402
+from arbiter_me import deploy as deploy_mod  # noqa: E402
+from arbiter_me import escrow as escrow_mod  # noqa: E402
 from arbiter_me.bech32 import to_0x, to_me1  # noqa: E402
-from arbiter_me.chain import (ANVIL_DEV_KEYS, ChainError, Client, DevKeySigner, cast, format_mec,  # noqa: E402
+from arbiter_me.build import compile_source  # noqa: E402
+from arbiter_me.chain import (ANVIL_DEV_KEYS, ZERO32, ChainError, Client, DevKeySigner, cast, format_mec,  # noqa: E402
                               network, parse_mec)
 from arbiter_me.contracts import (Escrow, Registry, creation_code, escrow_ctor_args,  # noqa: E402
                                   expected_runtime_hash)
 from arbiter_me.dogfood import TARGETS, load_self  # noqa: E402
 from arbiter_me.record import ARBITER_DIR, load_gate, plan_record, sha256_hex, verdict_code  # noqa: E402
+from arbiter_me.session import open_session  # noqa: E402
 
 JOB = ARBITER_DIR / "runs" / "gate" / "jobs" / "20261106-200206-977ff0"
 RID = "be2e752405bb"  # the same result as saved by the web UI
@@ -102,8 +121,12 @@ def main() -> int:
     anvil = start_anvil(args.port)
     rpc = f"http://127.0.0.1:{args.port}"
     try:
-        run(work, rpc)
+        ctx = run(work, rpc)
+        ctx["port"] = args.port
+        hardening_checks(ctx)
+        signal_checks()
         demo_checks(work, rpc)
+        capped_log_checks(ctx)  # last: mines 12,000 blocks
         if not args.offline:
             me_checks(work)
     finally:
@@ -281,6 +304,534 @@ def run(work: Path, rpc: str) -> None:
     check(guard, "the anvil dev key works on chain 31337")
     check(abi.keccak_hex(b"") == "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
           "pure-Python keccak256 matches the EVM")
+    return {"work": work, "rpc": rpc, "dep": dep, "net": net, "dev0": dev0, "dev1": dev1, "id3": id3,
+            "rec3": rec3, "rec1": rec1, "dp1": dp1, "ev_parent": ev_parent, "ev_patched": ev_patched,
+            "escrow": esc_addr}
+
+
+# ------------------------------------------------------------------ hardening (review findings me-tools-*)
+
+# An extra test a malicious bundle can put into its own regression.zip (with ffi = true).
+ZZ_SOL = """// SPDX-License-Identifier: MIT
+pragma solidity >=0.8.0;
+
+contract Zz {
+    function testZz() public {
+        string[] memory c = new string[](3);
+        c[0] = "sh";
+        c[1] = "-c";
+        c[2] = "id > __MARKER__";
+        (bool ok, ) = address(uint160(uint256(keccak256("hevm cheat code")))).call(
+            abi.encodeWithSignature("ffi(string[])", c));
+        ok;
+    }
+}
+"""
+
+# Injected into an exploit that is then registered (anchored by exploitHash): it tries every way
+# out of the replay sandbox, each through a low-level call so a refusal does not stop the attack.
+# The attack still reproduces only if the caller's environment is invisible.
+SANDBOX_ESCAPE = """
+        {
+            address _cv = address(uint160(uint256(keccak256("hevm cheat code"))));
+            string[] memory _cmd = new string[](3);
+            _cmd[0] = "sh";
+            _cmd[1] = "-c";
+            _cmd[2] = "touch __FFI__";
+            (bool _a, ) = _cv.call(abi.encodeWithSignature("ffi(string[])", _cmd));
+            (bool _b, ) = _cv.call(abi.encodeWithSignature("writeFile(string,string)", "__FS__", "x"));
+            (bool _c, bytes memory _env) = _cv.call(
+                abi.encodeWithSignature("envOr(string,string)", "ARBITER_PROBE_SECRET", ""));
+            require(!_c || bytes(abi.decode(_env, (string))).length == 0, "ARBITER probe: environment visible");
+            (bool _d, ) = _cv.call(abi.encodeWithSignature("createSelectFork(string)", "__URL__"));
+            _a;
+            _b;
+            _d;
+        }
+"""
+
+
+@contextlib.contextmanager
+def scenario(name: str):
+    """A scenario that raises (as the unfixed tools do on some inputs) is a FAIL, not a crash."""
+    try:
+        yield
+    except Exception as exc:  # noqa: BLE001
+        check(False, f"{name} (scenario raised)", f"{type(exc).__name__}: {exc}"[:400])
+
+
+def _session(ctx: dict, key: int = 0):
+    return open_session(argparse.Namespace(network="anvil", rpc=ctx["rpc"], deployments=ctx["dep"], dev=True,
+                                           dev_key=key), need_deployment=True)
+
+
+def _job(ctx: dict, name: str) -> Path:
+    d = ctx["work"] / name
+    d.mkdir()
+    shutil.copyfile(JOB / "gate.json", d / "gate.json")
+    return d
+
+
+def _refresh_manifest(bundle: Path, record_input: dict | None = None, drop_roles: tuple = ()) -> None:
+    """What a forger does after editing a bundle: re-hash the files (the manifest is not on chain)."""
+    m = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+    m["files"] = [f for f in m["files"] if f["role"] not in drop_roles]
+    for f in m["files"]:
+        f["sha256"] = sha256_hex((bundle / f["name"]).read_bytes())
+    if record_input is not None:
+        m["recordInput"] = record_input
+    (bundle / "manifest.json").write_text(json.dumps(m, indent=1, sort_keys=True, ensure_ascii=False) + "\n",
+                                          encoding="utf-8")
+
+
+def _rezip(bundle: Path, edit) -> None:
+    path = bundle / "regression.zip"
+    with zipfile.ZipFile(path) as zf:
+        files = {n: zf.read(n) for n in zf.namelist()}
+    files = edit(files)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for n in sorted(files):
+            zf.writestr(n, files[n])
+
+
+def _results_with(ctx: dict, mutate) -> Path:
+    """A copy of the run's results.jsonl with the proven PoC's Solidity changed."""
+    g = json.loads((JOB / "gate.json").read_text(encoding="utf-8"))
+    rows = [json.loads(ln) for ln in (ARBITER_DIR / g["input"]["results"]).read_text(encoding="utf-8").splitlines()
+            if ln.strip()]
+    for row in rows:
+        for p in row["outcome"]["pocs"]:
+            if p.get("passed") and p.get("adjudicated") and p.get("solidity"):
+                p["solidity"] = mutate(p["solidity"])
+    out = ctx["work"] / f"results-{len(list(ctx['work'].glob('results-*.jsonl')))}.jsonl"
+    out.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    return out
+
+
+def _checks(rv: dict, key: str, text: str) -> list[dict]:
+    return [c for c in (rv.get(key) or {}).get("checks", []) if text in c.get("what", "")]
+
+
+class _Listener:
+    """A local HTTP endpoint that counts requests (a sandboxed fork cheatcode must not reach it)."""
+
+    def __init__(self, port: int):
+        hits = self.hits = []
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802
+                hits.append(self.path)
+                self.send_response(500)
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        self.srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), H)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+
+def hardening_checks(ctx: dict) -> None:
+    for fn in (replay_sandbox_checks, cross_check_checks, escrow_resume_checks, gated_address_checks,
+               crlf_help_dirty_checks):
+        with scenario(fn.__name__):
+            fn(ctx)
+
+
+def replay_sandbox_checks(ctx: dict) -> None:
+    """me-tools-1, -2, -8: what verify --replay executes, and with what."""
+    work, net, dep, id3 = ctx["work"], ctx["net"], ctx["dep"], ctx["id3"]
+    ro = [*net[:-2], "--deployments", dep]
+
+    # me-tools-1: a bundle whose regression.zip turns ffi on and adds a test that runs a command
+    ev = work / "ev-ffi"
+    shutil.copytree(ctx["ev_parent"], ev)
+    marker = work / "PWNED"
+
+    def ffi_zip(files: dict) -> dict:
+        top = next(iter(files)).split("/")[0]
+        toml = files[f"{top}/foundry.toml"].decode()
+        files[f"{top}/foundry.toml"] = toml.replace("ffi = false", "ffi = true").encode()
+        files[f"{top}/test/arbiter/Zz.t.sol"] = ZZ_SOL.replace("__MARKER__", str(marker)).encode()
+        return files
+    _rezip(ev, ffi_zip)
+    code, v = cli_json("verify", id3, "--evidence", ev, "--replay", *ro)
+    rv = (v.get("records") or [{}])[0]
+    zipc = _checks(rv, "replay", "regression.zip")
+    repro = _checks(rv, "replay", "攻擊在原始碼上重現")
+    check(not marker.exists() and zipc and not zipc[0]["ok"] and "Zz.t.sol" in str(zipc[0]["actual"])
+          and "ffi" in str(zipc[0]["actual"]) and repro and repro[0]["ok"],
+          "verify --replay never runs the bundle's regression.zip (its ffi test does not execute; the zip is "
+          "reported, the anchored attack still reproduces)",
+          f"marker={marker.exists()} " + json.dumps(rv.get("replay"), ensure_ascii=False)[:500])
+
+    # me-tools-1: an anchored exploit (registered, so exploitHash matches) that tries ffi, a file
+    # write, the caller's environment and the network from inside the replay
+    jd = _job(ctx, "job-mal")
+    ffi_m, fs_m = work / "MAL_FFI", work / "MAL_FS"
+    listener = _Listener(ctx["port"] + 5)
+    url = f"http://127.0.0.1:{ctx['port'] + 5}"
+    escape = SANDBOX_ESCAPE.replace("__FFI__", str(ffi_m)).replace("__FS__", str(fs_m)).replace("__URL__", url)
+    res = _results_with(ctx, lambda s: s.replace("function arbSetup() external {",
+                                                 "function arbSetup() external {" + escape, 1))
+    ev = work / "ev-mal"
+    code, r = cli_json("register", jd / "gate.json", "--source", SOURCE, "--results", res, "--evidence-out", ev,
+                       *net, "--dev")
+    mal = (r.get("record") or {}).get("id")
+    os.environ["ARBITER_PROBE_SECRET"] = "probe-secret-value"
+    try:
+        code, v = cli_json("verify", mal, "--evidence", ev, "--replay", *ro)
+    finally:
+        os.environ.pop("ARBITER_PROBE_SECRET", None)
+        listener.close()
+    rv = (v.get("records") or [{}])[0]
+    repro = _checks(rv, "replay", "攻擊在原始碼上重現")
+    check(bool(mal) and not ffi_m.exists() and not fs_m.exists() and bool(repro) and repro[0]["ok"],
+          "an anchored exploit cannot use ffi, write files or read the caller's environment during --replay",
+          f"ffi={ffi_m.exists()} fs={fs_m.exists()} " + json.dumps(rv.get("replay"), ensure_ascii=False)[:500])
+    if (rv.get("replay") or {}).get("networkIsolated"):
+        check(not listener.hits, "an anchored exploit cannot reach the network during --replay (unshare)",
+              f"{len(listener.hits)} request(s) reached the local listener")
+    else:
+        print("SKIP  network isolation (unshare -rn is not available here; not counted)")
+
+    # me-tools-2: a forged regression.zip (honest paths removed, manifest re-hashed) is not what runs
+    ev = work / "ev-forged"
+    shutil.copytree(ctx["ev_parent"], ev)
+
+    def forge_zip(files: dict) -> dict:
+        top = next(iter(files)).split("/")[0]
+        name = f"{top}/test/arbiter/ArbiterRegression.t.sol"
+        text = files[name].decode()
+        files[name] = re.sub(r"^\s*function testHonestPath\d+\(\) public \{[^\n]*\}\n", "", text, flags=re.M).encode()
+        return files
+    _rezip(ev, forge_zip)
+    _refresh_manifest(ev)
+    code, v = cli_json("verify", id3, "--evidence", ev, "--replay", *ro)
+    rv = (v.get("records") or [{}])[0]
+    zipc = _checks(rv, "replay", "regression.zip")
+    honest = _checks(rv, "replay", "原始碼上沒有攻擊時的誠實路徑")
+    check(code == 1 and zipc and not zipc[0]["ok"] and "ArbiterRegression.t.sol" in str(zipc[0]["actual"])
+          and honest and honest[0]["ok"] and str(honest[0]["actual"]).startswith("4 個測試"),
+          "a forged regression.zip is reported; the replay runs the test rebuilt from the anchored exploit "
+          "(4 honest paths from gate.json, none vacuous)", json.dumps(rv.get("replay"), ensure_ascii=False)[:600])
+
+    # me-tools-8: no solc 0.8.20 installed (empty HOME); the tool must provide it, forge stays offline
+    real = build_mod.find_solc("0.8.20")
+    asked: list[str] = []
+    orig_find, orig_home = build_mod.find_solc, os.environ.get("HOME")
+
+    def fake_find(version: str = "0.8.24") -> str:
+        asked.append(version)
+        return real if version == "0.8.20" else orig_find(version)
+    empty = work / "empty-home"
+    empty.mkdir()
+    build_mod.find_solc = fake_find
+    os.environ["HOME"] = str(empty)
+    try:
+        code, v = cli_json("verify", id3, "--evidence", ctx["ev_parent"], "--replay", *ro)
+    finally:
+        build_mod.find_solc = orig_find
+        os.environ["HOME"] = orig_home or ""
+    rv = (v.get("records") or [{}])[0]
+    check(code == 0 and (rv.get("replay") or {}).get("ok") and "0.8.20" in asked,
+          "verify --replay works without a preinstalled solc: it asks find_solc for 0.8.20, forge stays --offline",
+          f"asked={asked} " + str(v)[:400])
+
+
+def cross_check_checks(ctx: dict) -> None:
+    """me-tools-3 (on-chain verdict vs the anchored gate.json) and me-tools-4 (patched source)."""
+    work, net, dep, id3 = ctx["work"], ctx["net"], ctx["dep"], ctx["id3"]
+    ro = [*net[:-2], "--deployments", dep]
+    g = load_gate(_job(ctx, "job-e8") / "gate.json")
+    s1 = _session(ctx, 1)
+
+    # verdict 1 registered over a gate.json that says proven_exploitable, deployed through the gate
+    ev = work / "ev-e8"
+    plan = plan_record(g, SOURCE, out_dir=ev)
+    plan.input.update(verdict=1, predicateClass=0, evidenceTier=0, exploitHash=ZERO32)
+    _refresh_manifest(ev, plan.input, drop_roles=("exploit",))
+    reg = deploy_mod.register_record(s1, plan)
+    d = deploy_mod.deploy_through_registry(s1, reg["id"], plan.build)
+    code, v = cli_json("verify", d["address"], "--evidence", ev, "--rebuild", "--replay", *ro)
+    rv = (v.get("records") or [{}])[0]
+    bad = [c for c in (rv.get("evidence") or {}).get("checks", []) if not c["ok"]]
+    check(d["status"] == "deployed" and code == 1 and (rv.get("evidence") or {}).get("verdictMismatch") is True
+          and any("判定" in c["what"] and str(c["expected"]) == "3" and str(c["actual"]) == "1" for c in bad),
+          "verify reports a verdict-1 record whose anchored gate.json says proven_exploitable",
+          json.dumps(rv.get("evidence"), ensure_ascii=False)[-700:])
+
+    # same, but the bundle still carries the exploit: replaying it must count against verdict 1
+    ev = work / "ev-e8b"
+    plan = plan_record(g, SOURCE, out_dir=ev)
+    plan.input.update(verdict=1, predicateClass=0, evidenceTier=0, exploitHash=ZERO32)
+    _refresh_manifest(ev, plan.input)
+    reg = deploy_mod.register_record(s1, plan)
+    code, v = cli_json("verify", reg["id"], "--evidence", ev, "--replay", *ro)
+    rv = (v.get("records") or [{}])[0]
+    contra = [c for c in (rv.get("replay") or {}).get("checks", [])
+              if "不能成功" in c["what"] and not c.get("level")]
+    check(code == 1 and contra and not contra[0]["ok"] and (rv.get("replay") or {}).get("ok") is False,
+          "replaying a bundle's exploit that succeeds against a verdict-1 record is a failure",
+          json.dumps(rv.get("replay"), ensure_ascii=False)[:500])
+
+    # me-tools-4: a patched child whose source is the verified patch plus a backdoor
+    s0 = _session(ctx, 0)
+    ev = work / "ev-e1"
+    plan = plan_record(g, SOURCE, out_dir=ev, patched=True, parent_id=id3)
+    srcp = ev / "src" / "StakingVault.sol"
+    text = srcp.read_text(encoding="utf-8")
+    cut = text.rstrip().rfind("}")
+    bad_src = text[:cut] + "    function sweep() external { payable(msg.sender).transfer(address(this).balance); }\n}\n"
+    srcp.write_text(bad_src, encoding="utf-8")
+    b = compile_source(bad_src, "StakingVault.sol", evm_version="paris")
+    plan.input.update(sourceHash=sha256_hex(bad_src.encode("utf-8")), initcodeHash=b.initcode_hash)
+    plan.build = b
+    _refresh_manifest(ev, plan.input)
+    reg = deploy_mod.register_record(s0, plan)
+    d = deploy_mod.deploy_through_registry(s0, reg["id"], b)
+    code, v = cli_json("verify", d["address"], "--evidence", ev, "--rebuild", "--replay", *ro)
+    rv = (v.get("records") or [{}])[0]
+    deriv = _checks(rv, "evidence", "patch.diff")
+    deriv = [c for c in deriv if "上一版原始碼套用" in c["what"]]
+    check(d["status"] == "deployed" and code == 1 and deriv and not deriv[0]["ok"],
+          "verify flags a patched record whose source is not parent source + patch.diff (extra backdoor)",
+          json.dumps(rv.get("evidence"), ensure_ascii=False)[-600:])
+
+
+def escrow_resume_checks(ctx: dict) -> None:
+    """me-tools-7: nothing is sent for a request this record cannot settle; a failing step is
+    recorded in me.json and a rerun finishes it without registering again."""
+    net, dep, dev0 = ctx["net"], ctx["dep"], ctx["dev0"]
+    reg = _session(ctx, 0).registry
+    code, q = cli_json("escrow", "request", "--source", SOURCE, "--auditor", dev0, "--fee", "0.01",
+                       *net, "--dev", "--dev-key", "1")
+    req = q.get("id")
+    jd = _job(ctx, "job-e4")
+    before = reg.record_count()
+    code, out = cli("deploy", jd / "gate.json", "--source", SOURCE, "--patch", "--parent", ctx["id3"],
+                    "--escrow-request", req, "--evidence-out", ctx["work"] / "ev-e4p", *net, "--dev")
+    check(code != 0 and reg.record_count() == before and "沒有送出任何交易" in out,
+          "a request the patched record cannot settle (other source) is refused before anything is sent", out[-400:])
+
+    # the settle transaction fails (a network hiccup): me.json still records the registered record
+    orig_settle = escrow_mod.settle
+
+    def broken(*a, **k):
+        raise ChainError("simulated network failure")
+    escrow_mod.settle = broken
+    argv = ["register", jd / "gate.json", "--source", SOURCE, "--escrow-request", req,
+            "--evidence-out", ctx["work"] / "ev-e4", *net, "--dev"]
+    try:
+        code, r = cli_json(*argv)
+    finally:
+        escrow_mod.settle = orig_settle
+    side = json.loads((jd / "me.json").read_text()) if (jd / "me.json").exists() else {}
+    er = side.get("escrow_request") or {}
+    check(code == 1 and (side.get("record") or {}).get("id") == before + 1 and side.get("pending") == ["settle"]
+          and er.get("status") == "open" and "simulated" in str(er.get("settleError")),
+          "a failing settle is recorded in me.json (record, pending, error) instead of aborting", str(side)[:400])
+    code, r = cli_json(*argv)
+    side = json.loads((jd / "me.json").read_text()) if (jd / "me.json").exists() else {}
+    check(code == 0 and reg.record_count() == before + 1 and (side.get("escrow_request") or {}).get("status") == "paid"
+          and not side.get("pending") and r.get("resumed") is True,
+          "rerunning the same command settles with the same record (no duplicate registration)", str(r)[:400])
+
+    # deployAudited fails mid-way: the rerun deploys the record it already registered
+    jd = _job(ctx, "job-e4d")
+    orig_deploy = deploy_mod.deploy_through_registry
+
+    def broken_deploy(*a, **k):
+        raise ChainError("simulated receipt timeout")
+    deploy_mod.deploy_through_registry = broken_deploy
+    argv = ["deploy", jd / "gate.json", "--source", SOURCE, "--patch", "--parent", ctx["id3"],
+            "--evidence-out", ctx["work"] / "ev-e4d", *net, "--dev"]
+    before = reg.record_count()
+    try:
+        code, r = cli_json(*argv)
+    finally:
+        deploy_mod.deploy_through_registry = orig_deploy
+    side_path = next((p for p in (jd / "me.patched.json", jd / "me.json") if p.exists()), None)
+    side = json.loads(side_path.read_text()) if side_path else {}
+    part = side.get("patched") or side
+    check(code == 1 and (part.get("record") or {}).get("id") == before + 1 and part.get("pending") == ["deploy"]
+          and (part.get("deploy") or {}).get("status") == "failed",
+          "a failing deployAudited leaves me.json with the registered record and 'deploy' pending", str(side)[:400])
+    code, r = cli_json(*argv)
+    check(code == 0 and reg.record_count() == before + 1 and (r.get("deploy") or {}).get("status") == "deployed"
+          and (r.get("record") or {}).get("id") == before + 1,
+          "rerunning deploys the record already registered (no duplicate)", str(r)[:400])
+
+
+def gated_address_checks(ctx: dict) -> None:
+    """me-tools-10: a second gated deployment of a record whose first link is a claim."""
+    work, net, dep = ctx["work"], ctx["net"], ctx["dep"]
+    s0 = _session(ctx, 0)
+    g = load_gate(_job(ctx, "job-e9") / "gate.json")
+    ev = work / "ev-e9"
+    plan = plan_record(g, SOURCE, out_dir=ev, patched=True, parent_id=ctx["id3"])
+    reg = deploy_mod.register_record(s0, plan)
+    s0.send(s0.registry.address, abi.encode_call("linkDeployment(uint256,address)", reg["id"], ctx["escrow"]))
+    d = deploy_mod.deploy_through_registry(s0, reg["id"], plan.build)
+    code, v = cli_json("verify", d["address"], "--evidence", ev, "--rebuild", *net[:-2], "--deployments", dep)
+    rv = (v.get("records") or [{}])[0]
+    check(code == 0 and (rv.get("rebuild") or {}).get("ok") and rv.get("linkKindAtAddress") == 2
+          and str((rv.get("firstLink") or {}).get("address", "")).lower() == ctx["escrow"].lower()
+          and rv.get("codehashMatches") is True,
+          "verify <gated address> compares the address asked about, not the record's first (claimed) link",
+          json.dumps({k: rv.get(k) for k in ("rebuild", "firstLink", "linkKindAtAddress")}, ensure_ascii=False)[:500])
+
+
+def crlf_help_dirty_checks(ctx: dict) -> None:
+    """me-tools-11 (CRLF upload), -12 (escrow help), -13 (dirty tool commit)."""
+    work, net, dep, dev0 = ctx["work"], ctx["net"], ctx["dep"], ctx["dev0"]
+    ro = [*net[:-2], "--deployments", dep]
+    lf_hash = sha256_hex(SOURCE.read_bytes())
+    crlf = work / "crlf" / "StakingVault.sol"
+    crlf.parent.mkdir()
+    crlf.write_bytes(SOURCE.read_bytes().replace(b"\n", b"\r\n"))
+    jd = _job(ctx, "job-crlf")
+    code, r = cli_json("deploy", jd / "gate.json", "--source", crlf, "--dry-run", "--evidence-out", work / "ev-crlf",
+                       *net, "--dev")
+    check(code == 0 and (r.get("recordInput") or {}).get("sourceHash") == lf_hash
+          and any("CRLF" in n for n in r.get("notes") or [])
+          and sha256_hex((work / "ev-crlf" / "src" / "StakingVault.sol").read_bytes()) == lf_hash,
+          "a CRLF copy of the audited file is accepted: sourceHash and src/ are the LF text the gate audited", str(r)[:300])
+    code, v = cli_json("verify", "--source", crlf, *ro)
+    check(ctx["id3"] in [x["record"]["id"] for x in v.get("records", [])], "verify --source finds the record from a CRLF copy")
+    code, q = cli_json("escrow", "request", "--source", crlf, "--auditor", dev0, "--fee", "0.001", *net, "--dev",
+                       "--dev-key", "1")
+    code, st = cli_json("escrow", "status", q.get("id"), *ro)
+    check(str(st.get("sourceHash", "")).lower() == lf_hash, "escrow request --source hashes the LF text too", str(st))
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.suppress(SystemExit):
+        me_cli.main(["escrow", "--help"])
+    text = buf.getvalue()
+    check("任何人都可以送" not in text and "只有委託指定的稽核者能送" in text and "任何人都能送" in text,
+          "escrow --help: only the named auditor settles; anyone may send the refund after the grace period", text[-400:])
+
+    for flag in ("source-text", "flag"):
+        jd = _job(ctx, f"job-dirty-{flag}")
+        g = json.loads((jd / "gate.json").read_text(encoding="utf-8"))
+        g["tool_commit"] = "ab" * 20
+        if flag == "flag":
+            g.update(tool_commit_source="git HEAD", tool_commit_dirty=True)
+        else:
+            g["tool_commit_source"] = "git HEAD（有未提交的修改）"
+        (jd / "gate.json").write_text(json.dumps(g, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        ev = work / f"ev-dirty-{flag}"
+        code, out = cli("deploy", jd / "gate.json", "--source", SOURCE, "--dry-run", "--evidence-out", ev, *net, "--dev")
+        code2, r = cli_json("register", jd / "gate.json", "--source", SOURCE, "--evidence-out", ev, *net, "--dev")
+        rec = r.get("record") or {}
+        man = json.loads((ev / "manifest.json").read_text(encoding="utf-8")) if (ev / "manifest.json").exists() else {}
+        code3, vout = cli("verify", rec.get("id", 0), "--evidence", ev, *ro)
+        check(code == 0 and "有未提交的修改" in out and code2 == 0 and rec.get("toolCommitDirty") is True
+              and man.get("toolCommitDirty") is True and "有未提交的修改" in vout,
+              f"a dirty tool commit ({flag}) is marked in the output, the sidecar, the manifest and verify",
+              f"{out[-200:]} | {str(rec)[:200]} | {vout[-200:]}")
+
+
+def signal_checks() -> None:
+    """me-tools-9: the keystore password file is removed when the process is stopped."""
+    child = ("import sys, time\nsys.path.insert(0, sys.argv[1])\nfrom arbiter_me.chain import KeystoreSigner\n"
+             "s = KeystoreSigner('probe-account', address='0x' + '11' * 20)\nprint(s._pwfile, flush=True)\n"
+             "time.sleep(60)\n")
+    for name in ("SIGTERM", "SIGHUP", "SIGINT"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        # A new session has no controlling terminal, so getpass reads the password from stdin.
+        p = subprocess.Popen([sys.executable, "-c", child, str(ME)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True, start_new_session=True)
+        try:
+            p.stdin.write("probe-password\n")
+            p.stdin.flush()
+            line: list[str] = []
+            t = threading.Thread(target=lambda: line.append(p.stdout.readline().strip()), daemon=True)
+            t.start()
+            t.join(20)
+            pw = Path(line[0]) if line and line[0] else None
+            existed = bool(pw and pw.exists() and pw.read_text() == "probe-password")
+            p.send_signal(sig)
+            p.wait(timeout=20)
+        finally:
+            if p.poll() is None:
+                p.kill()
+        check(existed and not pw.exists() and not pw.parent.exists(),
+              f"the keystore password file is removed when the signer process gets {name}",
+              f"existed={existed} left={bool(pw and pw.exists())}")
+
+
+class _CapProxy(http.server.BaseHTTPRequestHandler):
+    """JSON-RPC proxy that refuses eth_getLogs over more than 10,000 blocks, as ME's node does."""
+    upstream = ""
+
+    def do_POST(self):  # noqa: N802
+        body = self.rfile.read(int(self.headers.get("content-length") or 0))
+        req = json.loads(body)
+        if req.get("method") == "eth_getLogs":
+            f = (req.get("params") or [{}])[0]
+            latest = int(self._up({"jsonrpc": "2.0", "id": 1, "method": "eth_blockNumber", "params": []})["result"], 16)
+
+            def num(tag):
+                return latest if tag in (None, "latest", "pending", "safe", "finalized") else (
+                    0 if tag == "earliest" else int(tag, 16))
+            if num(f.get("toBlock")) - num(f.get("fromBlock", "earliest")) > 10_000:
+                return self._reply({"jsonrpc": "2.0", "id": req.get("id"),
+                                    "error": {"code": -32000, "message": "maximum [from, to] blocks distance: 10000"}})
+        return self._reply(self._up(req))
+
+    def _up(self, payload: dict) -> dict:
+        r = urllib.request.Request(self.upstream, data=json.dumps(payload).encode(),
+                                   headers={"content-type": "application/json"})
+        with urllib.request.urlopen(r, timeout=30) as resp:
+            return json.loads(resp.read().decode())
+
+    def _reply(self, doc: dict) -> None:
+        data = json.dumps(doc).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, *a):
+        pass
+
+
+def capped_log_checks(ctx: dict) -> None:
+    """me-tools-5: verify against a node that caps eth_getLogs at 10,000 blocks, long after the
+    records were registered."""
+    with scenario("capped_log_checks"):
+        client = Client(network("anvil", ctx["rpc"]))
+        client.rpc("anvil_mine", [hex(12_000), hex(5)])
+        _CapProxy.upstream = ctx["rpc"]
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", ctx["port"] + 6), _CapProxy)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        proxy = f"http://127.0.0.1:{ctx['port'] + 6}"
+        try:
+            dep2 = ctx["work"] / "anvil-noblock.json"
+            d = json.loads(Path(ctx["dep"]).read_text())
+            d["registry"].pop("block", None)
+            dep2.write_text(json.dumps(d))
+            for label, depfile in (("", ctx["dep"]), (" (deployment file without a block)", dep2)):
+                code, v = cli_json("verify", ctx["id3"], "--network", "anvil", "--rpc", proxy, "--deployments", depfile)
+                r3 = (v.get("records") or [{}])[0]
+                code2, v2 = cli_json("verify", ctx["dp1"]["address"], "--network", "anvil", "--rpc", proxy,
+                                     "--deployments", depfile)
+                r1 = (v2.get("records") or [{}])[0]
+                check(code == 0 and code2 == 0 and r3.get("registeredTx") == ctx["rec3"]["tx"]
+                      and r1.get("registeredTx") == ctx["rec1"]["tx"] and r1.get("linkedTx") == ctx["dp1"]["tx"],
+                      f"verify works 12,000 blocks later behind a 10,000-block eth_getLogs cap{label}",
+                      f"{str(v)[:200]} | {str(v2)[:200]}")
+        finally:
+            srv.shutdown()
+            srv.server_close()
 
 
 SELF_GATES = {key: t.default_gate for key, t in TARGETS.items()}

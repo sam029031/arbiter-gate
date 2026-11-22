@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from .live import ChainUnavailable, LiveChain, Step
-from .units import has_treasury, token_of
+from .units import harness_body, has_treasury, token_of
 
 PRAGMA_RE = re.compile(r"^\s*pragma solidity ([^;]+);", re.MULTILINE)
 TARGET_DECL_RE = re.compile(
@@ -242,10 +242,16 @@ def parse_poc(poc_path: Path, target_path: Path, sample_id: str) -> Replay:
               if PRAGMA_RE.search(text) else ">=0.8.0")
 
     attacker = _agent_declarations(text)
-    test_m = re.search(r"\bcontract\s+TestArbiter\w*\b", text)
-    if not test_m:
-        raise Untranslatable("no test contract")
-    test_body, _ = _balanced_block(text, test_m.end())
+    # The harness's own test contract: the LAST `contract TestArbiterVictim is Harness`
+    # outside comments and strings. The first `contract TestArbiter...` in the file could
+    # be one attacker_code declared, which would skip the token/treasury refusal below
+    # and replay a token proof as ether.
+    test_body, _ = harness_body(text)
+    if not test_body:
+        test_m = re.search(r"\bcontract\s+TestArbiter\w*\b", text)
+        if not test_m:
+            raise Untranslatable("no test contract")
+        test_body, _ = _balanced_block(text, test_m.end())
     if "function arbSetup()" in test_body:
         if has_treasury(text):
             raise NotSupported(NOT_SUPPORTED_TREASURY)

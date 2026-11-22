@@ -24,13 +24,15 @@ stops the gate (unless `run_all`, which the self-test uses to exercise every che
     5  re-attack   (in repair(), after 0-4) the agent audits the PATCHED contract again,
                    briefed that it was patched (the diff) and with the mechanism of every
                    attack proven so far, measured from forge's trace (technique.py);
-                   a new proven attack rejects the patch and becomes the next round's
-                   evidence -- at most two defences (attack, defend, attack, defend,
-                   attack), then "修補未通過再攻擊". Every exploit the re-attack ran is
-                   traced too, and check 5 passes only if one of them was a different
-                   technique (new_entry / new_class); a re-attack that only repeated a
-                   known mechanism is "not_diverse" -- the patch still stands on 0-4 as
-                   the best fix found, but check 5 is not counted as passed
+                   a new attack the harness passes against the patch -- whether or not
+                   the model also got a finding accepted -- rejects the patch and becomes
+                   the next round's evidence -- at most two defences (attack, defend,
+                   attack, defend, attack), then "修補未通過再攻擊". Every exploit the
+                   re-attack ran is traced too, and check 5 passes only if one of them
+                   compiled, was traced, and was a different technique (new_entry /
+                   new_class); a re-attack that only repeated a known mechanism, or whose
+                   new ideas never ran, is "not_diverse" -- the patch still stands on 0-4
+                   as the best fix found, but check 5 is not counted as passed
 
 Check 1 alone accepts an always-revert "fix": its failure message is word for word the
 real fix's. Check 2 is what refuses it. An identity filter (`code.length == 0`) passes
@@ -69,10 +71,10 @@ from typing import Any
 
 from .benchmark import diff_line_count
 from .repo import SKIP_DIRS, plan_for
-from .technique import (NOVEL, describe, fingerprint_attempts, fingerprint_poc,
+from .technique import (counts_as_new, describe, fingerprint_attempts, fingerprint_poc,
                         follow_up_brief, reattack_brief, strongest)
 from .tools import _test_passed, parse_arguments
-from .units import WEI, format_amount, has_treasury, token_of
+from .units import SYMBOL_RE, WEI, format_amount, has_treasury, token_of
 from .workspace import VICTIM_ENVIRONMENTS, Workspace
 
 TARGET_PATH = "src/Target.sol"
@@ -118,6 +120,9 @@ _REPORT_CONTRACT = "^TestArbiterReport$"
 _REPORT_TEST = r"^testArb((Honest|Attacked)[0-9]+|Unit)\(\)$"
 _POC_NAME = "ArbiterFix"
 _HERMETIC_IMPORT = "../src/Target.sol"
+# The test pragma of the hermetic workspace (Workspace with no plan); repo.RepoPlan's
+# test_pragma is this for a contract at 0.8 or above and ">=0.6.0" below it.
+HERMETIC_PRAGMA = ">=0.8.0"
 
 
 # -- the report contract ---------------------------------------------------------------
@@ -199,13 +204,16 @@ _UNIT_RE = re.compile(r'ArbiterUnit\((\d+)[^,]*,\s*"([^"]*)"\)')
 
 
 def parse_unit(output: str, token: str | None) -> Any:
-    """The unit a report run measured in: "wei", or {"token", "decimals"} for a token."""
+    """The unit a report run measured in: "wei", or {"token", "decimals"} for a token.
+    "token" is the token's symbol() when it is a plain symbol, else None: never the token
+    expression itself, which the AI wrote and the result page would print
+    (web-security-wording-1; units.unit_symbol applies the same rule to older results)."""
     if token is None:
         return WEI
     m = _UNIT_RE.search(output)
     dec = int(m.group(1)) if m and int(m.group(1)) <= 77 else None
     sym = m.group(2).strip() if m else ""
-    return {"token": sym if re.fullmatch(r"[\w.\-]{1,16}", sym) else token, "decimals": dec}
+    return {"token": sym if SYMBOL_RE.fullmatch(sym) else None, "decimals": dec}
 
 
 def parse_trials(output: str, token: str | None = None) -> list[dict[str, Any]]:
@@ -610,7 +618,15 @@ def exploit_from_row(row: dict[str, Any], project: bool = False) -> dict[str, An
     test). In repo mode (`project`: the target sits in a project whose own tests check 4
     runs, or it imports and cannot be made hermetic) `repo` carries {root, rel, solidity}
     with the exploit as the harness composed it, importing arbiter-target/<file>; the
-    patch gate then builds against copies of the project."""
+    patch gate then builds against copies of the project.
+
+    A contract below 0.8 (a one-file upload the --mode repo compile check admits) is built
+    in repo form too, even with no imports: the hermetic workspace declares >=0.8.0 in
+    test/Vm.sol, which cannot be compiled next to it, so A/B/G, the patch and check 5
+    would all fail on a proof that reproduces (sandbox-misc-1). `repo["single_file"]`
+    marks such a one-file repository: there are no project tests for check 4 to run.
+    `solidity` stays hermetic for the regression test, which writes Vm.sol with the
+    exploit's own pragma."""
     o = row["outcome"]
     poc = next((p for p in o.get("pocs", []) if p.get("passed") and p.get("adjudicated")),
                None)
@@ -625,12 +641,18 @@ def exploit_from_row(row: dict[str, Any], project: bool = False) -> dict[str, An
     repo = None
     if plan.get("target_import"):
         imports = re.search(r"^\s*import\b", source, re.MULTILINE) is not None
+        below = (plan.get("pragma") or HERMETIC_PRAGMA) != HERMETIC_PRAGMA
         root, target = Path(plan.get("repo_root") or ""), Path(plan.get("target") or "")
-        if (project or imports) and root.is_dir() and target.is_file():
+        if (project or imports or below) and root.is_dir() and target.is_file():
             repo = {"root": str(root), "rel": target.relative_to(root).as_posix(),
                     "solidity": solidity}
+            if below and not (project or imports):
+                repo["single_file"] = True
         elif imports:
             raise ValueError("target has imports and its repository is no longer on disk")
+        elif below:
+            raise ValueError("the contract is below solc 0.8 and its one-file repository is no "
+                             "longer on disk; the hermetic workspace cannot build it")
         if not imports:
             solidity = hermetic_exploit(solidity, plan["target_import"])
     finding = next((f for f in o.get("findings", []) if f.get("poc_name") == poc["name"]),
@@ -693,7 +715,7 @@ def reproduce(source: str, solidity: str, root: Path, sample_id: str,
         out = _check("pass", abg=abg, abi=run.abi)
         if fingerprint:
             out["fingerprint"] = fingerprint_poc(run.ws, run.poc, solidity, source)
-        if run.copy is not None and with_project_tests:
+        if run.copy is not None and with_project_tests and not repo.get("single_file"):
             out["repo_tests"] = project_tests(run.copy)
         return out
     finally:
@@ -863,7 +885,7 @@ def verify_fix(
             return _finish(checks, diff, changed, patched)
 
         # 4 -- the project's own tests (repo mode, Foundry): nothing that passed may fail
-        if run.copy is None:
+        if run.copy is None or repo.get("single_file"):
             checks["4"] = _check("not_applicable", reason="單一檔案，沒有專案自己的測試")
         else:
             before = base.get("repo_tests") or {"status": "not_run", "reason": "沒有量到修補前的結果"}
@@ -1030,7 +1052,9 @@ def _victim_fragments(solidity: str) -> dict[str, str]:
     """The victim's own calls, taken from the fixed template (arbEnter / arbExit)."""
     out = {}
     for name in ("arbEnter", "arbExit"):
-        m = re.search(rf"function {name}\(\) external \{{\n(.*?)\n    \}}", solidity, re.S)
+        # `arbFrame` (the harness-only modifier) since the ME build; older proofs lack it.
+        m = re.search(rf"function {name}\(\) external(?: arbFrame)? \{{\n(.*?)\n    \}}",
+                      solidity, re.S)
         if m:
             body = [ln.strip() for ln in m.group(1).splitlines()
                     if ln.strip() and "Prank" not in ln]
@@ -1191,8 +1215,14 @@ def reattack(
 
     Every adjudicated exploit the audit ran is traced again in the patched workspace
     before it is deleted (`attempts`, each with its novelty against `known`; `novel` when
-    one of them is new_entry / new_class). When none is and MIN_FOLLOW_UP_TURNS of the
-    budget are left, one more audit runs with those exploits listed as not new.
+    one of them counts as a different technique: compiled, traced, new_entry / new_class).
+    When none does and MIN_FOLLOW_UP_TURNS of the budget are left, one more audit runs
+    with those exploits listed as not new.
+
+    An exploit the harness adjudicated as passing against the patched contract breaks the
+    patch whether or not the model also got a finding accepted -- a refused submission or
+    an exhausted turn budget does not make the attack fail (gate-logic-2). It is the proven
+    re-attack (`finding_submitted` says whether a finding cites it).
 
     status: "proven" (with `exploit`: the new attack, re-runnable on later patches when its
     predicate is victim_loss), "not_proven", or "not_executed" (it did not complete --
@@ -1211,6 +1241,16 @@ def reattack(
     out: dict[str, Any] = {"n": n, "ruled_out": list(ruled_out), "status": "not_executed"}
     outcomes: list[AgentOutcome] = []
     attempts: list[dict[str, Any]] = []
+    # (audit index, adjudicated PoC as recorded, its attempt): fingerprint_attempts keeps
+    # one attempt per adjudicated PoC, in order, so the two line up exactly.
+    adjudicated: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
+
+    def trace(i: int) -> list[dict[str, Any]]:
+        pocs = [p for p in outcomes[i].as_dict()["pocs"] if p.get("adjudicated")]
+        got = fingerprint_attempts(ws, pocs, patched, known_fps)
+        adjudicated.extend((i, p, a) for p, a in zip(pocs, got))
+        return got
+
     try:
         ws, copy, ctx = _reattack_workspace(exploit, patched, root, sid)
         if not ctx.get("ok"):
@@ -1220,15 +1260,14 @@ def reattack(
         sink = trace_sink if trace_sink is not None else []
         outcomes.append(audit(gateway, ws, max_turns=max_turns, max_tokens=max_tokens,
                               trace_sink=sink, ruled_out=None, proposals=brief))
-        attempts = fingerprint_attempts(ws, outcomes[0].as_dict()["pocs"], patched, known_fps)
+        attempts = trace(0)
         left = max_turns - outcomes[0].turns
-        if (not outcomes[0].proven and _audit_ran(outcomes[0]) and left >= MIN_FOLLOW_UP_TURNS
-                and not any(a["novelty"] in NOVEL for a in attempts)):
+        if (not _broke(outcomes[0]) and _audit_ran(outcomes[0])
+                and left >= MIN_FOLLOW_UP_TURNS and not any(counts_as_new(a) for a in attempts)):
             outcomes.append(audit(gateway, ws, max_turns=left, max_tokens=max_tokens,
                                   trace_sink=sink, ruled_out=None,
                                   proposals=brief + follow_up_brief(attempts)))
-            attempts += fingerprint_attempts(ws, outcomes[1].as_dict()["pocs"], patched,
-                                             known_fps)
+            attempts += trace(1)
     except BuildUnavailable as exc:
         out["reason"] = f"toolchain_unavailable: {exc}"[:300]
         return out
@@ -1243,28 +1282,29 @@ def reattack(
         out["elapsed_s"] = round(time.monotonic() - t0, 2)
         out["requests"] = gateway.usage.requests - req0
     assert outcomes and all(isinstance(oc, AgentOutcome) for oc in outcomes)
-    final = next((oc for oc in outcomes if oc.proven), outcomes[-1])
-    o = final.as_dict()
-    stop = str(o.get("stop_reason") or "")
+    hit = _proof(adjudicated, outcomes)
+    final = outcomes[hit[0]] if hit else outcomes[-1]
+    stop = str(final.stop_reason or "")
     out.update(turns=sum(oc.turns for oc in outcomes), stop_reason=stop, audits=len(outcomes),
                tried=[a["hypothesis"] for a in attempts], attempts=attempts,
-               novel=any(a["novelty"] in NOVEL for a in attempts), novelty=strongest(attempts))
-    if final.proven:
-        poc = next((p for p in o.get("pocs") or [] if p.get("passed") and p.get("adjudicated")), {})
+               novel=any(counts_as_new(a) for a in attempts), novelty=strongest(attempts))
+    if hit:
+        i, poc, att = hit
         # The proven attack's own novelty, not the strongest of the attempts around it.
-        hit = next((a for a in reversed(attempts) if a["passed"] and a["name"] == poc.get("name")),
-                   None)
-        out["novelty"] = hit["novelty"] if hit else "unknown"
-        finding = next((f for f in o.get("findings") or [] if f.get("poc_name") == poc.get("name")),
-                       (o.get("findings") or [{}])[0])
+        out["novelty"] = att["novelty"]
+        finding = next((f for f in outcomes[i].findings if f.get("poc_name") == poc.get("name")),
+                       None)
+        out["finding_submitted"] = finding is not None
         sol = poc.get("solidity") or ""
         new = {"poc_name": poc.get("name"), "predicate": poc.get("predicate"),
                "hypothesis": " ".join(str(poc.get("hypothesis") or "").split())[:300],
-               "finding": {k: finding.get(k) for k in ("title", "vulnerable_function",
-                                                        "offending_expression", "attack_path",
-                                                        "severity")},
-               "repo_solidity": sol, "solidity": sol,
-               "fingerprint": hit["fingerprint"] if hit else None}
+               # No finding cites it (refused, or the budget ran out): the harness's verdict
+               # on the exploit stands; the finding's fields stay empty rather than guessed.
+               "finding": {k: (finding or {}).get(k) for k in (
+                   "title", "vulnerable_function", "offending_expression", "attack_path",
+                   "severity")},
+               "finding_submitted": finding is not None,
+               "repo_solidity": sol, "solidity": sol, "fingerprint": att["fingerprint"]}
         target_import = ws.target_import if ws is not None else _HERMETIC_IMPORT
         if not exploit.get("repo") and target_import != _HERMETIC_IMPORT:
             try:
@@ -1277,6 +1317,30 @@ def reattack(
     else:
         out["status"] = "not_proven"
     return out
+
+
+def _broke(outcome: Any) -> bool:
+    """Did any exploit of this audit pass under the harness's own predicate?"""
+    return any(p.passed and p.adjudicated for p in outcome.pocs)
+
+
+_PROOF_RANK = {"victim_loss": 0, "liveness_broken": 1}
+
+
+def _proof(adjudicated: list[tuple[int, dict[str, Any], dict[str, Any]]],
+           outcomes: list[Any]) -> tuple[int, dict[str, Any], dict[str, Any]] | None:
+    """The re-attack's proof: of the exploits that passed against the patched contract,
+    the first one a finding cites (the first passed record of that name, as everywhere
+    else), else the first victim_loss, liveness_broken, then any other predicate; None
+    when nothing passed."""
+    passed = [h for h in adjudicated if h[1].get("passed")]
+    for i, oc in enumerate(outcomes):
+        for f in oc.findings:
+            hit = next((h for h in passed if h[0] == i and h[1].get("name") == f.get("poc_name")),
+                       None)
+            if hit:
+                return hit
+    return min(passed, key=lambda h: _PROOF_RANK.get(h[1].get("predicate"), 2), default=None)
 
 
 def _audit_ran(outcome: Any) -> bool:
@@ -1297,6 +1361,8 @@ def _attack_entry(rnd: int, ra: dict[str, Any]) -> dict[str, Any]:
         x = ra["exploit"]
         e.update(poc_name=x.get("poc_name"), predicate=x.get("predicate"),
                  hypothesis=x.get("hypothesis"), finding=x.get("finding"), abg=ra.get("abg"))
+        if "finding_submitted" in x:
+            e["finding_submitted"] = x["finding_submitted"]
     return e
 
 
@@ -1357,7 +1423,7 @@ def repair(
         record["skip_reason"] = "not_reproducible"
         record["checks"] = {"0": {k: v for k, v in base.items() if k not in _BASE_ONLY}}
         return _close(record, gateway, req0, t0)
-    if repo:
+    if repo and not repo.get("single_file"):
         rt = base.get("repo_tests") or {}
         record["repo_tests_before"] = {"status": rt.get("status"), "reason": rt.get("reason"),
                                        "passed": len(rt.get("passed") or []),
@@ -1458,7 +1524,13 @@ def repair(
         ra = reattack(gateway, exploit, result["patched"], root=root, ruled_out=ruled_out,
                       n=defence, max_turns=reattack_turns, max_tokens=max_tokens,
                       trace_sink=on_turn, known=known)
-        if ra["status"] == "proven" and (ra["exploit"] or {}).get("predicate") in STRICT_PATCHED:
+        if ra["status"] != "proven" and any(a.get("passed") for a in ra.get("attempts") or []):
+            # reattack() records an exploit that passed against the patch as the proven
+            # re-attack; one that ever comes back otherwise still broke the patch, so it is
+            # never a pass or not_diverse (gate-logic-2).
+            ra = {**ra, "status": "proven",
+                  "reason": ra.get("reason") or "an exploit passed against the patched contract"}
+        if ra["status"] == "proven" and (ra.get("exploit") or {}).get("predicate") in STRICT_PATCHED:
             x = ra["exploit"]
             xrepo = {**repo, "solidity": x["repo_solidity"]} if repo else None
             m = reproduce(result["patched"], x["solidity"], root, f"{sid}_ra{defence}",
@@ -1484,12 +1556,13 @@ def repair(
             record["checks_5"] = {"status": status, "turns": ra.get("turns"),
                                   "reason": ra.get("reason", ""), "novel": ra.get("novel")}
             break
-        if defence >= max_defenses:
+        x = ra.get("exploit")
+        if defence >= max_defenses or not x:
+            # (no exploit to feed the next defence with: the patch stays rejected)
             record["status"] = "rejected_reattack"
             record["checks_5"] = {"status": "fail", "turns": ra.get("turns"),
                                   "novelty": ra.get("novelty")}
             break
-        x = ra["exploit"]
         if x.get("hypothesis"):
             ruled_out.append(x["hypothesis"])
         known.append({"hypothesis": x.get("hypothesis"), "fingerprint": x.get("fingerprint")})
@@ -1507,8 +1580,10 @@ def repair(
               "0-4, but the contract WITH YOUR PATCH was audited again and another attack "
               "still harms the victim:\n"
               f"  hypothesis: {x.get('hypothesis', '')}\n"
-              f"  vulnerable function: {f.get('vulnerable_function', '')}\n"
-              f"  attack path: {f.get('attack_path', '')}\n"
+              # (both empty when the exploit passed but no finding cites it)
+              + (f"  vulnerable function: {f['vulnerable_function']}\n"
+                 if f.get("vulnerable_function") else "")
+              + (f"  attack path: {f['attack_path']}\n" if f.get("attack_path") else "")
               + (f"  mechanism (from its trace): {describe(x['fingerprint'])}\n"
                  if x.get("fingerprint") else "")
               + (f"  measured on your patch: {abg}\n" if abg else "")

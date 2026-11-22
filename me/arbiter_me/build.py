@@ -8,6 +8,7 @@ paths or comments). The settings go into the evidence bundle as compiler.json.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -64,23 +65,33 @@ class Build:
                 "contract": self.contract, "constructorArgs": self.ctor_args}
 
 
+def _svm_paths(version: str) -> list[Path]:
+    """Where svm (Foundry's solc manager) keeps solc: ~/.svm, or the XDG data dir when ~/.svm
+    does not exist (newer svm releases)."""
+    xdg = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    return [d / version / f"solc-{version}" for d in (Path.home() / ".svm", xdg / "svm")]
+
+
 def find_solc(version: str = SOLC_VERSION) -> str:
-    """svm's install location first (Foundry puts solc there), then PATH."""
-    cand = [Path.home() / ".svm" / version / f"solc-{version}", shutil.which(f"solc-{version}"), shutil.which("solc")]
+    """svm's install location first (Foundry puts solc there), then PATH; otherwise let forge
+    download it once (the only network access the tools make for compiling)."""
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version or ""):
+        raise ChainError(f"solc 版本格式不對：{version!r}")
+    cand = [*_svm_paths(version), shutil.which(f"solc-{version}"), shutil.which("solc")]
     for c in cand:
         if c and Path(c).exists():
             out = subprocess.run([str(c), "--version"], capture_output=True, text=True).stdout
             if f"Version: {version}+" in out:
                 return str(c)
-    # Let forge download it once (it caches solc in ~/.svm).
+    # Let forge download it once (it caches solc in ~/.svm). The project is this throwaway one.
     with tempfile.TemporaryDirectory(prefix="arbiter-solc-") as tmp:
         (Path(tmp) / "src").mkdir()
         (Path(tmp) / "src" / "A.sol").write_text(f"pragma solidity {version};\ncontract A {{}}\n")
         subprocess.run([find_tool("forge"), "build", "--use", version, "--root", tmp],
                        capture_output=True, text=True, timeout=600)
-    p = Path.home() / ".svm" / version / f"solc-{version}"
-    if p.exists():
-        return str(p)
+    for p in _svm_paths(version):
+        if p.exists():
+            return str(p)
     raise ChainError(f"找不到 solc {version}；請先執行 `forge build --use {version}` 讓 Foundry 下載")
 
 

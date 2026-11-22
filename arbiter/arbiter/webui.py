@@ -19,6 +19,7 @@ from typing import Any
 
 from .progress import STEPS
 from .solc_avail import MISSING_RE
+from .units import unit_symbol
 from .verdict import LABELS, NO_PROVABLE, NOT_EXECUTED, PROVEN, STATIC_HINT
 
 ENV_NAMES = ["預設", "受害者餘額 1000 倍", "一週後", "8 輪攻擊"]
@@ -66,7 +67,7 @@ GLOSSARY = {
     "鏈上紀錄": "寫進區塊鏈、之後不能修改的紀錄：哪個帳戶、在什麼時候、登記了什麼判定和證據雜湊。它不證明判定是對的，對不對要重跑證據確認。",
     "雜湊": "檔案的指紋：內容改一個字，雜湊就完全不同。拿下載的檔案重算一次，就能比對是不是同一份。",
     "CREATE2": "一種部署合約的方式：位址由部署者、程式碼和一個指定值算出來，程式碼改一個字，位址就不同。",
-    "托管": "稽核費先放在鏈上合約裡：稽核完成就付給稽核者，沒有完成就退回給付款人。",
+    "託管": "稽核費先放在鏈上合約裡：稽核完成就付給稽核者，沒有完成就退回給付款人。",
 }
 
 
@@ -112,8 +113,10 @@ def _fixed(v: int, decimals: int, places: int = 6) -> str:
 
 
 def amount(v: Any, unit: Any = None) -> str:
-    """An amount in its scenario's unit (gate.json abg.environments[].unit): wei as ETH,
-    or {"token": symbol or address, "decimals": n} for an ERC-20 amount."""
+    """An amount in its scenario's unit (gate.json abg.environments[].unit), as page HTML: wei
+    as ETH, or {"token": symbol or address, "decimals": n} for an ERC-20 amount. The label is
+    only ever a plain symbol or an address, escaped: an older gate.json may hold the AI-written
+    token expression there (web-security-wording-1), which is written as 「代幣」."""
     if not isinstance(unit, dict):
         return eth(_int(v)) if v is not None else "—"
     n = _int(v)
@@ -123,10 +126,10 @@ def amount(v: Any, unit: Any = None) -> str:
         decimals = min(max(int(unit.get("decimals") or 0), 0), 77)
     except (TypeError, ValueError):
         decimals = 0
-    sym = str(unit.get("token") or "代幣")
+    sym = unit_symbol(unit) or "代幣"
     if re.fullmatch(r"0x[0-9a-fA-F]{40}", sym):
         sym = f"{sym[:6]}…{sym[-4:]}"
-    return f"{_fixed(n, decimals)} {sym}"
+    return f"{_fixed(n, decimals)} {esc(sym)}"
 
 
 # Internal notes the pipeline writes in English (gate.py, patch.py), in plain words. A note
@@ -561,8 +564,8 @@ def ladder(ev: dict[str, Any] | None, link: str = "") -> str:
         if i == 2 and (ev.get("rung3") or {}).get("worlds") and link:
             extra += f"<p><a class='btn small' href='{esc(link)}'>看這次的真鏈重播（每筆交易）</a></p>"
         rungs.append(f"<div class='rung {st[i] if st[i] in ('pass', 'fail') else ''}'><div class='n'>第 {i + 1} 階</div>"
-                     f"<div><b>{name}：{words.get(st[i], st[i])}</b><br><span class='note'>{what}</span>{extra}</div></div>")
-    return (f"<h2>證據等級：爬到第 {ev.get('reached', 1)} 階</h2><div class='card'><div class='ladder'>{''.join(rungs)}</div>"
+                     f"<div><b>{name}：{words.get(st[i]) or esc(st[i])}</b><br><span class='note'>{what}</span>{extra}</div></div>")
+    return (f"<h2>證據等級：爬到第 {esc(ev.get('reached', 1))} 階</h2><div class='card'><div class='ladder'>{''.join(rungs)}</div>"
             "<p class='note'>階數越高，證據越不依賴我們的測試框架。另有"
             "<a href='/chain'>參考攻擊的真鏈示範</a>（已知攻擊，在本地真鏈上的完整交易）。</p></div>")
 
@@ -1287,8 +1290,8 @@ def _chain_html(steps: list[Step]) -> str:
 
 def _escrow_line(me: dict[str, Any], q: dict[str, Any]) -> str:
     st = str(q.get("status"))
-    fee = amount(q.get("fee_wei"), {"token": "MEC", "decimals": 18})
-    parts = [f"{esc(fee)}，{ESCROW_WORDS.get(st) or esc(st)}" + ("，費用不隨判定改變" if st == "paid" else "")]
+    fee = amount(q.get("fee_wei"), {"token": "MEC", "decimals": 18})  # already page HTML
+    parts = [f"{fee}，{ESCROW_WORDS.get(st) or esc(st)}" + ("，費用不隨判定改變" if st == "paid" else "")]
     if rid := _record_id(q.get("recordId")):
         parts.append(f"由紀錄 #{rid} 結算")
     if q.get("settleTx"):
@@ -1359,7 +1362,7 @@ def me_card(me: dict[str, Any] | None) -> str:
             ("模型", f"<code>{esc(rec.get('model') or '未記錄')}</code>")]
     esc_req = me.get("escrow_request")
     if isinstance(esc_req, dict):
-        rows.append((term("托管", "托管") + "的稽核費", _escrow_line(me, esc_req)))
+        rows.append((term("託管", "託管") + "的稽核費", _escrow_line(me, esc_req)))
     if me.get("recordedAt"):
         rows.append(("登記時間", esc(me.get("recordedAt"))
                      + (f"（紀錄 #{esc(prid)}：{esc(pat.get('recordedAt'))}）" if prec and pat.get("recordedAt") else "")))

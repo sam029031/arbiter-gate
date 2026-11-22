@@ -55,6 +55,9 @@ fs_permissions = []
 # exploitable. Agents that need to act as a plain account use mode='eoa'.
 _CONTRACT_ATTACK = "        atk.attack();"
 
+# The victim-loss test contract's head, as the template writes it.
+_VICTIM_HEAD_RE = re.compile(r"\bcontract\s+TestArbiterVictim\s+is\s+Harness\s*\{")
+
 # The pranked block an EOA-mode attack runs inside; its body is the attack. Two spellings:
 # the profit templates prank a local `eoa`, the victim-loss template pranks the
 # contract-level `arbEoa`. Matching only the first left every EOA-mode victim_loss proof
@@ -528,16 +531,23 @@ class Workspace:
         (see _VICTIM_TRIAL_ASSETS). `token_expr` measures every party in that ERC20
         rather than in ether; the victim is handed up to the environment's endowment of
         the deployer's tokens. `treasury_exit` is the deployer's own legitimate claim
-        (e.g. `target.withdrawFees();`), run after the victim exits in both worlds, so a
-        drained fee pot is harm to the owner. With neither, the file is exactly the
-        ether-only one.
+        (one call, e.g. `target.withdrawFees(payable(address(this)));`), run after the
+        victim exits in both worlds, so a drained fee pot is harm to the owner. With
+        neither, the file uses the ether-only trial.
+
+        Since the ME-build soundness review (scripts/soundness_probe.py) both trials also
+        require the gain to have left the contract under audit, start every trial from
+        one snapshot, fix the measured contract and token when setup returns, and keep
+        the harness's frames and the victim's address out of reach of the code written
+        before the attack; and the fragments are checked here for the constructions that
+        got past all of that -- see the _reject_* functions this calls.
         """
         _eoa = draw_identity()
         _victim = draw_identity()
         assets = bool(token_expr.strip() or treasury_exit.strip())
-        # Drawn only when used, so an ether-only composition consumes exactly the random
-        # draws it always did.
         _stranger = draw_identity() if assets else ""
+        _atk_eoa = draw_identity()
+        _atk_salt = "0x" + secrets.token_bytes(32).hex()
         deploy_code = strip_preamble(deploy_code)
         attacker_code = strip_preamble(attacker_code)
         attack_body = strip_preamble(attack_body)
@@ -589,10 +599,48 @@ class Workspace:
         _reject_harness_names(deploy_code, "deploy_code", _setup_names(mode))
         _reject_harness_names(victim_enter, "victim_enter", _victim_step_names(mode))
         _reject_harness_names(victim_exit, "victim_exit", _victim_step_names(mode))
+        # Fragments are complete statements (attacker_code: complete declarations), and the
+        # file's only test is the harness's own.
+        for field, text in (("deploy_code", deploy_code), ("attacker_code", attacker_code),
+                            ("attack_body", attack_body), ("victim_enter", victim_enter),
+                            ("victim_exit", victim_exit), ("treasury_exit", treasury_exit),
+                            ("token_expr", token_expr)):
+            _reject_unbalanced(text, field)
+        _reject_test_functions(attacker_code)
+        # Nothing that can run before the attack may read the harness's bytecode, where
+        # the drawn accounts live; attacker_code is included because setup can call it.
+        for field, text in (("deploy_code", deploy_code), ("attacker_code", attacker_code),
+                            ("victim_enter", victim_enter), ("victim_exit", victim_exit),
+                            ("treasury_exit", treasury_exit), ("token_expr", token_expr)):
+            _reject_code_reading(text, field)
+        _reject_harness_frames(attacker_code, "attacker_code")
+        if re.search(r"[;{}]", _blank_noncode(token_expr)):
+            raise ValueError("token_expr must be a single expression naming the token, "
+                             "e.g. 'address(tok)'.")
+        # The victim approves only the target and keeps no value in, or hands no
+        # authority to, a contract the agent wrote (the measured token aside).
+        _agent = _agent_kinds(attacker_code)
+        # Followed through setup and the victim's own locals, in the order they run.
+        _bound = _agent_bound_names(
+            ";\n".join((deploy_code, victim_enter, victim_exit)),
+            {n for n, k in _agent.items() if k == "contract"})
+        if "target" in _bound:
+            # Otherwise "the contract under audit" is a look-alike the agent wrote, and
+            # whatever its backdoor does proves theft against the file that was uploaded.
+            raise ValueError(
+                "deploy_code makes 'target' a contract your attacker_code declares (or a "
+                "cast of one). 'target' has to be an instance of the contract under audit.")
+        _exempt = set(re.findall(r"[A-Za-z_]\w*", _blank_noncode(token_expr))) - {
+            "address", "payable", "target"}
+        for field, text in (("victim_enter", victim_enter), ("victim_exit", victim_exit)):
+            _reject_foreign_approval(text, field, _bound - _exempt)
+            _reject_agent_custody(text, field, _agent, _bound, _exempt)
         if assets:
             # The owner's claim is the owner's own call: it may not impersonate anyone.
             _reject_halting(treasury_exit, "treasury_exit")
             _reject_forgery(treasury_exit, "treasury_exit")
+            if treasury_exit.strip():
+                _reject_treasury_shape(treasury_exit)
             # The widened measurement is only as sound as the parties staying unknown to
             # the code written before them. The harness's own identities are contract
             # constants, so they are in scope for setup by name; refuse them here rather
@@ -611,9 +659,11 @@ class Workspace:
                         "or leave them with the deployer: the harness hands the victim "
                         "up to the environment's endowment of the deployer's tokens.")
 
+        # Every measurement reads the token the trial fixed right after setup (arbTok),
+        # never the expression itself, which the attack could make name another token.
         if token_expr.strip():
-            measure_victim = f"_ArbiterToken({token_expr.strip()}).balanceOf(arbVictim)"
-            _tok = f"_ArbiterToken({token_expr.strip()})"
+            measure_victim = "_ArbiterToken(arbTok).balanceOf(arbVictim)"
+            _tok = "_ArbiterToken(arbTok)"
             measure_atk = (
                 f"{_tok}.balanceOf(address(atk)) + {_tok}.balanceOf(arbAtkEoa)"
                 if mode == "contract" else f"{_tok}.balanceOf(arbEoa)"
@@ -649,6 +699,14 @@ class Workspace:
             victim_enter, victim_exit)
         if _victim_decls:
             _state_decls = _state_decls + "\n" + _victim_decls
+        if mode != "contract":
+            # attack_body runs inside the test contract: it may make calls, not rewrite
+            # what setup built, what the victim holds, or the harness's own state.
+            _reject_harness_writes(
+                attack_body, "attack_body",
+                set(re.findall(r"internal\s+([A-Za-z_]\w*);", _state_decls))
+                | set(_HARNESS_STATE))
+            _reject_harness_frames(attack_body, "attack_body")
         env = VICTIM_ENVIRONMENTS
         trial_keys = dict(
             n_env=len(env),
@@ -679,7 +737,7 @@ class Workspace:
                        if mode == "contract" else "arbEoa.balance")
 
             def held(who: str) -> str:
-                return f"_ArbiterToken({tok}).balanceOf({who})" if tok else f"{who}.balance"
+                return f"_ArbiterToken(arbTok).balanceOf({who})" if tok else f"{who}.balance"
 
             treasury = bool(treasury_exit.strip())
             measure_owner = held("address(this)")
@@ -697,10 +755,10 @@ class Workspace:
                 asset_mutability="view" if tok else "pure",
                 treasury_fns=(_VICTIM_TREASURY_FNS.format(
                     treasury_exit=_indent(treasury_exit, 8)) if treasury else ""),
-                token_endow=_VICTIM_TOKEN_ENDOW.format(token=tok) if tok else "",
+                token_endow=_VICTIM_TOKEN_ENDOW if tok else "",
                 owner_mid=(_VICTIM_OWNER_MID.format(measure_owner=measure_owner)
                            if treasury else ""),
-                measure_target=held("address(target)"),
+                measure_target=held("arbTgt"),
                 measure_atk_eth=eth_atk,
                 paid_check="netEth < 0" if tok else "false",
                 treasury_stage=(_VICTIM_TREASURY_STAGE.format(
@@ -713,6 +771,8 @@ class Workspace:
             trial_and_run=trial,
             victim_addr=_victim,
             eoa_addr=_eoa,
+            atk_eoa_addr=_atk_eoa,
+            atk_salt=_atk_salt,
             pragma=self.pragma,
             target_import=self.target_import,
             extra_imports=("\n" + extras if extras else ""),
@@ -1093,7 +1153,17 @@ class Workspace:
         # The two filters are for callers that keep more than one test contract in a
         # PoC file (the patch gate's report contract inherits the exploit's test, so an
         # unfiltered run reports both, and _test_passed() takes any [PASS] as a pass).
-        # Omitted, the command is exactly what it always was.
+        # Omitted, the command is exactly what it always was -- except for a victim_loss
+        # composition, which is judged by its own test and nothing else: callers read any
+        # [PASS] as a pass, so a second test in the file would otherwise decide the
+        # verdict (compose_victim_loss also refuses test functions in attacker_code).
+        if match_contract is None and match_test is None:
+            try:
+                text = (self.root / "test" / f"{name}.t.sol").read_text(encoding="utf-8")
+            except OSError:
+                text = ""
+            if _VICTIM_HEAD_RE.search(_blank_noncode(text)):
+                match_contract, match_test = "^TestArbiterVictim$", r"^testArbiterVictimLoss\(\)$"
         extra: list[str] = []
         if match_contract:
             extra += ["--match-contract", match_contract]
@@ -1277,6 +1347,7 @@ def _indent(text: str, spaces: int) -> str:
 _VICTIM_ERROR = (
     "error ArbiterNoHarm(uint256 recoveredWithoutAttack, uint256 recoveredWithAttack,\n"
     "                    uint256 attackerGain);\n"
+    "error ArbiterGainNotFromTarget(uint256 attackerGain);\n"
 )
 
 # Three conditions, and the third is the one measurement forced. Harm alone is not
@@ -1286,10 +1357,16 @@ _VICTIM_ERROR = (
 # What separates a drain from contention is CONSERVATION: in a drain, what the victim
 # lost is in the attacker's hands. In contention it is not, because the attacker took
 # value they had a claim to. So the attacker's gain must cover the victim's shortfall.
+#
+# The fourth condition is attribution: the gain has to have left the contract under audit
+# during the attack. Without it, harm and conservation are both satisfiable on a correct
+# contract -- the victim's value parked in a contract the agent wrote, or contention on the
+# target paired with a gain from anywhere at all.
 _VICTIM_FAIL = """        uint256 shortfall = recoveredA > recoveredB ? recoveredA - recoveredB : 0;
         if (recoveredB >= recoveredA || attackGain == 0 || attackGain < shortfall) {
             revert ArbiterNoHarm(recoveredA, recoveredB, attackGain);
-        }"""
+        }
+        if (!accounted) { revert ArbiterGainNotFromTarget(attackGain); }"""
 
 _VICTIM_FAIL_REQUIRE = """        uint256 shortfall = recoveredA > recoveredB ? recoveredA - recoveredB : 0;
         if (recoveredB >= recoveredA || attackGain == 0 || attackGain < shortfall) {
@@ -1298,6 +1375,10 @@ _VICTIM_FAIL_REQUIRE = """        uint256 shortfall = recoveredA > recoveredB ? 
                 ", withAttack=", _u(recoveredB),
                 ", attackerGain=", _u(attackGain), ")"
             )));
+        }
+        if (!accounted) {
+            revert(string(abi.encodePacked("ArbiterGainNotFromTarget(attackerGain=",
+                                           _u(attackGain), ")")));
         }"""
 
 # Both of these now capture the data location, and both drop it on the way up, because a
@@ -1683,7 +1764,13 @@ interface _ArbiterHarness {{ function arbiterVictim() external view returns (add
 {attacker_code}
 
 contract TestArbiterVictim is Harness {{
-    function arbiterVictim() external pure returns (address) {{ return arbVictim; }}
+    /// The victim, to whoever asks once setup has returned. Setup runs in this contract
+    /// too, and a getter that answered it would hand setup the address the draw exists to
+    /// hide (a low-level call by selector needs no harness name at all).
+    function arbiterVictim() external view returns (address) {{
+        require(arbRevealed, "ARBITER: the victim is drawn after setup; setup cannot look it up");
+        return arbVictim;
+    }}
 
     bytes32 internal constant ARB_COMPLETED = keccak256("arbiter.predicate.reached");
     address internal constant arbVictim = address(uint160({victim_addr}));
@@ -1692,10 +1779,22 @@ contract TestArbiterVictim is Harness {{
 {attacker_decl}
     // The attacker's two identities, at contract level so they outlive arbDeploy.
     // Both are measured, because profit parked in the EOA rather than in the contract
-    // is still profit and used to read as zero.
-    address internal constant arbAtkEoa =
-        address(uint160(uint256(keccak256("arbiter.attacker"))));
+    // is still profit and used to read as zero. Both are drawn per composition; the EOA
+    // used to be keccak256("arbiter.attacker"), a preimage setup could rebuild from two
+    // string pieces that no name check sees.
+    address internal constant arbAtkEoa = address(uint160({atk_eoa_addr}));
     address internal constant arbEoa = address(uint160({eoa_addr}));
+    // The attacker contract is created with CREATE2 under this drawn salt: with CREATE,
+    // its address was the harness's next nonce, which setup can compute and appoint.
+    bytes32 internal constant ARB_ATK_SALT = bytes32(uint256({atk_salt}));
+
+    // Written by the harness only. The contract under audit is fixed the moment setup
+    // returns, so nothing the attack does can change WHICH contract is measured.
+    address internal arbTgt;
+    bool internal arbRevealed;
+    bool internal arbBusy;
+    bool internal arbGainAccounted;
+    uint256 internal arbRound;
 
     function testArbiterVictimLoss() public {{
         require(
@@ -1704,19 +1803,27 @@ contract TestArbiterVictim is Harness {{
         );
     }}
 
+    /// The harness's own frames. They are external only so that a reverting stage is a
+    /// result rather than an abort; an attacker that called them could redeploy the
+    /// world under the victim's feet or make the victim exit early.
+    modifier arbFrame() {{
+        require(msg.sender == address(this), "ARBITER: only the harness runs its frames");
+        _;
+    }}
+
     // ---- agent-supplied fragments, each in its own frame ----
 
-    function arbSetup() external {{
+    function arbSetup() external arbFrame {{
 {deploy_code}
     }}
 
-    function arbEnter() external {{
+    function arbEnter() external arbFrame {{
         vm.startPrank(arbVictim, arbVictim);
 {victim_enter}
         vm.stopPrank();
     }}
 
-    function arbExit() external {{
+    function arbExit() external arbFrame {{
         vm.startPrank(arbVictim, arbVictim);
 {victim_exit}
         vm.stopPrank();
@@ -1734,11 +1841,11 @@ contract TestArbiterVictim is Harness {{
     /// against a true net of zero -- while `gain` is the left-hand side of the
     /// conservation check that makes victim_loss mean *the attacker is holding what the
     /// victim lost*. That is a constructible false positive, not a missed finding.
-    function arbDeploy() external {{
+    function arbDeploy() external arbFrame {{
 {setup}
     }}
 
-    function arbAttack() external {{
+    function arbAttack() external arbFrame {{
 {attack_action}
     }}
 
@@ -1746,23 +1853,41 @@ contract TestArbiterVictim is Harness {{
 }}
 """
 
-# The ether-only trial and its judge, verbatim from before token_expr and treasury_exit
-# were measured: a composition that uses neither still produces the same file byte for
-# byte, so every proof, probe and published number from before stays comparable.
+# The ether-only trial and its judge. Until the ME build this was kept byte for byte as it
+# was before token_expr and treasury_exit, so old numbers stayed comparable; it is no
+# longer, because it was unsound in four ways that this text now closes (each has a case
+# in scripts/soundness_probe.py):
+#   * nothing tied the harm to the contract under audit: a victim who parked ether in a
+#     Bank the agent wrote, swept by the attack, proved theft against ANY target. The
+#     attacker's gain must now leave the contract under audit during the attack (the drain
+#     clause the per-asset trial already had).
+#   * trials ran back to back in one EVM state, so a later trial's setup could read what
+#     an earlier trial's attack left behind (the attacker's address, say) and appoint it,
+#     and env 2's warp accumulated, so its attacked world ran a week after its clean one.
+#     Every trial now starts from one snapshot.
+#   * the measured contract was the variable `target`, which the attack could reassign;
+#     it is now the address `target` held when setup returned.
+#   * a victim whose exit reverted counted as recovering nothing even if the attack had
+#     already paid them; recovery is now what the victim's wallet gained, either way.
 _VICTIM_TRIAL = """    /// One world. `withAttack` is the only thing that differs between the two runs of
     /// a pair; the other three arguments are the environment, which is swept.
     function arbTrial(bool withAttack, uint256 endow, uint256 warpBy, uint256 rounds)
         external
+        arbFrame
         returns (uint256 recovered, uint256 gain, bool attackRan)
     {{
         this.arbSetup();
+        arbTgt = address(target);
+        arbRevealed = true;
         if (warpBy > 0) {{ vm.warp(block.timestamp + warpBy); vm.roll(block.number + 1); }}
         vm.deal(arbVictim, endow);
         this.arbEnter();
         uint256 mid = {measure_victim};
 
         attackRan = true;
+        arbGainAccounted = true;
         if (withAttack) {{
+            uint256 tgtPre = arbTgt.balance;
             // A fresh attacker per round, and a SIGNED delta per round.
             //
             // Both halves are load-bearing and they were confused with each other. The
@@ -1791,12 +1916,53 @@ _VICTIM_TRIAL = """    /// One world. `withAttack` is the only thing that differ
                 net += int256({measure_atk}) - pre;
             }}
             gain = net > 0 ? uint256(net) : 0;
+            // Where the gain came from. In a drain it left the contract under audit; a
+            // gain the attacker took from anywhere else -- a contract the agent wrote and
+            // the victim was steered into, a pot setup funded -- says nothing about it.
+            uint256 tgtPost = arbTgt.balance;
+            arbGainAccounted = gain == 0 || (tgtPre > tgtPost && tgtPre - tgtPost >= gain);
         }}
+        require(address(target) == arbTgt,
+                "ARBITER: the attack replaced the contract under audit");
 
         // A victim who cannot get out AT ALL has recovered nothing. That is the harm,
-        // not an error, so the revert is caught rather than propagated.
+        // not an error, so the revert is caught rather than propagated -- and what they
+        // recovered is what their wallet gained, so a victim the attack already paid out
+        // is not counted as one who lost everything because the exit then had nothing.
         (bool exited, ) = address(this).call(abi.encodeWithSignature("arbExit()"));
-        recovered = exited && {measure_victim} > mid ? {measure_victim} - mid : 0;
+        exited;
+        recovered = {measure_victim} > mid ? {measure_victim} - mid : 0;
+    }}
+
+    /// One environment's matched pair, both worlds from the same snapshot.
+    struct ArbiterEthPair {{
+        bool ran;
+        uint256 recA;
+        uint256 recB;
+        uint256 g;
+        bool accounted;
+    }}
+
+    function _arbEthPair(uint256 snap, uint256 endow, uint256 warpBy, uint256 rounds)
+        internal
+        returns (ArbiterEthPair memory p)
+    {{
+        vm.revertToState(snap);
+        (bool okA, bytes memory ra) = address(this).call(
+            abi.encodeWithSignature(
+                "arbTrial(bool,uint256,uint256,uint256)", false, endow, warpBy, rounds));
+        if (!okA) {{ return p; }}
+        (uint256 recA, , ) = abi.decode(ra, (uint256, uint256, bool));
+        if (recA == 0) {{ return p; }}   // no baseline, so no harm can be shown
+        p.recA = recA;
+
+        vm.revertToState(snap);
+        (bool okB, bytes memory rb) = address(this).call(
+            abi.encodeWithSignature(
+                "arbTrial(bool,uint256,uint256,uint256)", true, endow, warpBy, rounds));
+        if (!okB) {{ return p; }}
+        (p.recB, p.g, p.ran) = abi.decode(rb, (uint256, uint256, bool));
+        p.accounted = arbGainAccounted;
     }}
 
     /// The endowment, the clock and the number of rounds were never the agent's to
@@ -1804,56 +1970,46 @@ _VICTIM_TRIAL = """    /// One world. `withAttack` is the only thing that differ
     /// mechanism and short of scale is being failed for the harness's decision. Each
     /// environment is tried as a matched PAIR, so the comparison inside a pair is always
     /// like for like and a sweep can only ever surface an asymmetry, never invent one.
-    function arbiterRun() external returns (bytes32) {{
+    function arbiterRun() external arbFrame returns (bytes32) {{
+        require(!arbBusy, "ARBITER: the harness is already running");
+        arbBusy = true;
+        // Every trial starts from this one state, so nothing a trial leaves behind --
+        // contracts, storage, the clock -- can reach a later trial's setup.
+        uint256 snap = vm.snapshotState();
         uint256[{n_env}] memory endow = [{endows}];
         uint256[{n_env}] memory warps = [{warps}];
         uint256[{n_env}] memory rounds = [{rounds}];
 
-        uint256 bestA;
-        uint256 bestB;
-        uint256 bestGain;
+        ArbiterEthPair memory best;
         bool anyRan;
 
         for (uint256 i = 0; i < {n_env}; i++) {{
-            (bool okA, bytes memory ra) = address(this).call(
-                abi.encodeWithSignature(
-                    "arbTrial(bool,uint256,uint256,uint256)",
-                    false, endow[i], warps[i], rounds[i]));
-            if (!okA) {{ continue; }}
-            (uint256 recA, , ) = abi.decode(ra, (uint256, uint256, bool));
-            if (recA == 0) {{ continue; }}   // no baseline, so no harm can be shown
-
-            (bool okB, bytes memory rb) = address(this).call(
-                abi.encodeWithSignature(
-                    "arbTrial(bool,uint256,uint256,uint256)",
-                    true, endow[i], warps[i], rounds[i]));
-            if (!okB) {{ continue; }}
-            (uint256 recB, uint256 g, bool ran) = abi.decode(rb, (uint256, uint256, bool));
-            if (!ran) {{ continue; }}
-            anyRan = true;
+            ArbiterEthPair memory p = _arbEthPair(snap, endow[i], warps[i], rounds[i]);
+            if (!p.ran) {{ continue; }}
 
             // Not `shortfall`. The report block below declares one at function scope, so
             // this used to shadow it and solc said so on EVERY compile of a victim_loss
             // exploit -- a nine-line warning quoting two template lines the agent did not
             // write and cannot change, spent out of the six thousand characters it gets.
-            uint256 gap = recA > recB ? recA - recB : 0;
-            if (gap > 0 && g >= gap) {{
-                bestA = recA; bestB = recB; bestGain = g;
-                break;                        // one environment is enough
-            }}
-            if (bestA == 0) {{ bestA = recA; bestB = recB; bestGain = g; }}
+            uint256 gap = p.recA > p.recB ? p.recA - p.recB : 0;
+            bool proven = gap > 0 && p.g >= gap && p.accounted;
+            if (proven || !anyRan) {{ best = p; }}
+            anyRan = true;
+            if (proven) {{ break; }}                 // one environment is enough
         }}
 
         require(anyRan, "ARBITER: the attack reverted in every environment, or the "
                         "victim's own path never worked -- fix victim_enter/victim_exit");
 
-        uint256 recoveredA = bestA;
-        uint256 recoveredB = bestB;
-        uint256 attackGain = bestGain;
+        uint256 recoveredA = best.recA;
+        uint256 recoveredB = best.recB;
+        uint256 attackGain = best.g;
+        bool accounted = best.accounted;
 
         // The definition of the vulnerability, and the one thing the agent cannot
-        // arrange for itself: the victim got less back BECAUSE the attack happened, and
-        // the attacker is holding more than they started with.
+        // arrange for itself: the victim got less back BECAUSE the attack happened, the
+        // attacker is holding more than they started with, and it came out of the
+        // contract under audit.
 {fail_report}
         return ARB_COMPLETED;
     }}"""
@@ -1878,12 +2034,19 @@ _VICTIM_TRIAL = """    /// One world. `withAttack` is the only thing that differ
 #     a public pool, and the deployer losing a race for it is contention, not theft.
 #   * Conservation runs over every party: the attacker must hold at least what the victim
 #     AND the treasury lost together.
-#   * The attacker's gain must be accounted for by what left the contract under audit or
-#     the victim's own wallet during the attack (or the contract ended up holding more, the
-#     stale-oracle exception the profit predicates already carry). A token gain minted by a
-#     faucet, or drawn from a mock the setup built, is refused. In token units the
-#     attacker's ether is measured too, because 10 ether of funding turned into tokens is
-#     a purchase, not a theft, and the harness has no price to net the two against.
+#   * The attacker's gain must be accounted for by what left the contract under audit
+#     during the attack, plus what left the victim's wallet THROUGH it: up to the drop in
+#     the victim's allowance to the contract under audit, or all of it when that contract
+#     is the token itself (its ledger is the victim's wallet). There is no exemption for
+#     a contract that ended up holding more -- one wei deposited by the attack bought it.
+#     A token gain minted by a faucet, drawn from a mock the setup built, pulled out of
+#     the victim's wallet by a mock token with no allowance check or by a spender the
+#     victim was made to approve, is refused. In token units the attacker's ether is
+#     measured too, because 10 ether of funding turned into tokens is a purchase, not a
+#     theft, and the harness has no price to net the two against.
+#   * The token is evaluated ONCE per trial, right after setup, and every measurement
+#     uses that address; an expression re-read at each measurement let the attack switch
+#     which token was being counted.
 _VICTIM_TRIAL_ASSETS = """    // ---- per-asset accounting ----
     //
     // Written by arbTrial for its caller to read after it returns, rather than returned:
@@ -1891,19 +2054,24 @@ _VICTIM_TRIAL_ASSETS = """    // ---- per-asset accounting ----
     // already decodes.
     uint256 internal arbTreasuryRec;
     bool internal arbClaimPublic;
-    bool internal arbGainAccounted;
     bool internal arbPaidEther;
+    address internal arbTok;
     address internal constant arbStranger = address(uint160({stranger_addr}));
 
-    /// The measured asset: address(0) for ether, else the token named by token_expr.
+    /// The measured asset: address(0) for ether, else the token named by token_expr. The
+    /// trial reads it once, right after setup (arbTok); nothing re-evaluates it later.
     function arbAsset() external {asset_mutability} returns (address) {{ return {asset_expr}; }}
 {treasury_fns}
     /// One world, as in the ether-only predicate, measured per party and per asset.
     function arbTrial(bool withAttack, uint256 endow, uint256 warpBy, uint256 rounds)
         external
+        arbFrame
         returns (uint256 recovered, uint256 gain, bool attackRan)
     {{
         this.arbSetup();
+        arbTgt = address(target);
+        arbTok = this.arbAsset();
+        arbRevealed = true;
         if (warpBy > 0) {{ vm.warp(block.timestamp + warpBy); vm.roll(block.number + 1); }}
         vm.deal(arbVictim, endow);
 {token_endow}
@@ -1914,9 +2082,12 @@ _VICTIM_TRIAL_ASSETS = """    // ---- per-asset accounting ----
         arbGainAccounted = true;
         arbPaidEther = false;
         if (withAttack) {{ (gain, attackRan) = _arbAttackRounds(rounds); }}
+        require(address(target) == arbTgt,
+                "ARBITER: the attack replaced the contract under audit");
 
         (bool exited, ) = address(this).call(abi.encodeWithSignature("arbExit()"));
-        recovered = exited && {measure_victim} > mid ? {measure_victim} - mid : 0;
+        exited;
+        recovered = {measure_victim} > mid ? {measure_victim} - mid : 0;
 {treasury_stage}
     }}
 
@@ -1925,6 +2096,7 @@ _VICTIM_TRIAL_ASSETS = """    // ---- per-asset accounting ----
     function _arbAttackRounds(uint256 rounds) internal returns (uint256 gain, bool attackRan) {{
         uint256 tgtPre = {measure_target};
         uint256 vicPre = {measure_victim};
+        uint256 allowPre = _arbAllowance();
         int256 net;
         int256 netEth;
         attackRan = true;
@@ -1940,12 +2112,38 @@ _VICTIM_TRIAL_ASSETS = """    // ---- per-asset accounting ----
             netEth += int256({measure_atk_eth}) - preEth;
         }}
         gain = net > 0 ? uint256(net) : 0;
-        uint256 tgtPost = {measure_target};
-        uint256 vicPost = {measure_victim};
-        uint256 outflow = (tgtPre > tgtPost ? tgtPre - tgtPost : 0)
-            + (vicPre > vicPost ? vicPre - vicPost : 0);
-        arbGainAccounted = gain == 0 || tgtPost > tgtPre || outflow >= gain;
+        arbGainAccounted = gain == 0 || _arbOutflow(tgtPre, vicPre, allowPre) >= gain;
         arbPaidEther = {paid_check};
+    }}
+
+    /// What left the contract under audit during the attack, plus what left the victim's
+    /// wallet through it (see the comment above the template).
+    function _arbOutflow(uint256 tgtPre, uint256 vicPre, uint256 allowPre)
+        internal
+        view
+        returns (uint256 out)
+    {{
+        uint256 tgtPost = {measure_target};
+        if (tgtPre > tgtPost) {{ out = tgtPre - tgtPost; }}
+        uint256 vicPost = {measure_victim};
+        if (vicPre > vicPost) {{
+            uint256 vicOut = vicPre - vicPost;
+            if (arbTok != arbTgt) {{
+                uint256 allowPost = _arbAllowance();
+                uint256 spent = allowPre > allowPost ? allowPre - allowPost : 0;
+                if (vicOut > spent) {{ vicOut = spent; }}
+            }}
+            out += vicOut;
+        }}
+    }}
+
+    /// The victim's allowance to the contract under audit: 0 for ether, or for a token
+    /// that has no allowance().
+    function _arbAllowance() internal view returns (uint256) {{
+        if (arbTok == address(0)) {{ return 0; }}
+        (bool ok, bytes memory d) = arbTok.staticcall(
+            abi.encodeWithSignature("allowance(address,address)", arbVictim, arbTgt));
+        return ok && d.length >= 32 ? abi.decode(d, (uint256)) : 0;
     }}
 
     struct ArbiterPair {{
@@ -1960,11 +2158,13 @@ _VICTIM_TRIAL_ASSETS = """    // ---- per-asset accounting ----
         bool claimPublic;
     }}
 
-    /// One environment's matched pair; `ran` is false when it cannot speak.
-    function _arbPair(uint256 endow, uint256 warpBy, uint256 rounds)
+    /// One environment's matched pair, both worlds from the same snapshot; `ran` is false
+    /// when it cannot speak.
+    function _arbPair(uint256 snap, uint256 endow, uint256 warpBy, uint256 rounds)
         internal
         returns (ArbiterPair memory p)
     {{
+        vm.revertToState(snap);
         (bool okA, bytes memory ra) = address(this).call(abi.encodeWithSignature(
             "arbTrial(bool,uint256,uint256,uint256)", false, endow, warpBy, rounds));
         if (!okA) {{ return p; }}
@@ -1973,6 +2173,7 @@ _VICTIM_TRIAL_ASSETS = """    // ---- per-asset accounting ----
         p.claimPublic = arbClaimPublic;
         if (p.recA == 0 && p.tA == 0) {{ return p; }}   // nobody has anything to lose
 
+        vm.revertToState(snap);
         (bool okB, bytes memory rb) = address(this).call(abi.encodeWithSignature(
             "arbTrial(bool,uint256,uint256,uint256)", true, endow, warpBy, rounds));
         if (!okB) {{ return p; }}
@@ -1988,14 +2189,18 @@ _VICTIM_TRIAL_ASSETS = """    // ---- per-asset accounting ----
     }}
 
     /// Harm to the parties together, conservation over all of them, and a gain the
-    /// contract under audit (or the victim's wallet) actually paid for.
+    /// contract under audit (or the victim's wallet, through it) actually paid for.
     function _arbProven(ArbiterPair memory p) internal pure returns (bool) {{
         return p.recA + p.tA > p.recB + p.tB && p.g > 0 && p.g >= _arbShortfall(p)
             && p.accounted && !p.paidEther;
     }}
 
-    /// Same matched pairs and the same environments as the ether-only predicate.
-    function arbiterRun() external returns (bytes32) {{
+    /// Same matched pairs, the same environments and the same snapshot isolation as the
+    /// ether-only predicate.
+    function arbiterRun() external arbFrame returns (bytes32) {{
+        require(!arbBusy, "ARBITER: the harness is already running");
+        arbBusy = true;
+        uint256 snap = vm.snapshotState();
         uint256[{n_env}] memory endow = [{endows}];
         uint256[{n_env}] memory warps = [{warps}];
         uint256[{n_env}] memory rounds = [{rounds}];
@@ -2003,7 +2208,7 @@ _VICTIM_TRIAL_ASSETS = """    // ---- per-asset accounting ----
         ArbiterPair memory best;
         bool anyRan;
         for (uint256 i = 0; i < {n_env}; i++) {{
-            ArbiterPair memory p = _arbPair(endow[i], warps[i], rounds[i]);
+            ArbiterPair memory p = _arbPair(snap, endow[i], warps[i], rounds[i]);
             if (!p.ran) {{ continue; }}
             bool proven = _arbProven(p);
             if (proven || !anyRan) {{ best = p; }}
@@ -2022,19 +2227,19 @@ _VICTIM_TRIAL_ASSETS = """    // ---- per-asset accounting ----
 # stranger drawn per composition, so setup can neither name nor pre-arrange it.
 _VICTIM_TREASURY_FNS = """
     /// treasury_exit, run as the deployer: what the owner legitimately claims.
-    function arbTreasuryExit() external {{
+    function arbTreasuryExit() external arbFrame {{
 {treasury_exit}
     }}
 
     /// The same claim made by a stranger. A claim a stranger can collect is a public
     /// pool and is not the owner's to lose, so it is not counted.
-    function arbTreasuryStranger() external {{
+    function arbTreasuryStranger() external arbFrame {{
         vm.startPrank(arbStranger, arbStranger);
 {treasury_exit}
         vm.stopPrank();
     }}
 
-    function arbEndPrank() external {{ vm.stopPrank(); }}
+    function arbEndPrank() external arbFrame {{ vm.stopPrank(); }}
 
     /// The deployer is the test contract, so it has to be able to take ether.
     receive() external payable {{}}
@@ -2062,18 +2267,17 @@ _VICTIM_TREASURY_STAGE = """        // The owner's claim, measured from the same
 # Setup cannot name the victim, so it cannot mint to them; most tokens mint their supply
 # to the deployer, which is the test contract. A token that does not leaves this a no-op
 # and victim_enter has to acquire tokens by a public path.
-_VICTIM_TOKEN_ENDOW = """        uint256 arbHeld = _ArbiterToken({token}).balanceOf(address(this));
-        if (arbHeld > 0) {{
-            (bool arbSent, ) = address({token}).call(abi.encodeWithSignature(
+_VICTIM_TOKEN_ENDOW = """        uint256 arbHeld = _ArbiterToken(arbTok).balanceOf(address(this));
+        if (arbHeld > 0) {
+            (bool arbSent, ) = arbTok.call(abi.encodeWithSignature(
                 "transfer(address,uint256)", arbVictim, endow < arbHeld ? endow : arbHeld));
             arbSent;
-        }}"""
+        }"""
 
 # The harness's own accounts, which code written before them may not name.
 _VICTIM_HARNESS_NAMES_RE = re.compile(r"\b(?:arbVictim|arbEoa|arbAtkEoa|arbStranger|arbiterVictim)\b")
 
 _VICTIM_ASSET_ERRORS = (
-    "error ArbiterGainNotFromTarget(uint256 attackerGain);\n"
     "error ArbiterPaidInEther(uint256 attackerGain);\n"
     "error ArbiterTreasuryNoHarm(uint256 recoveredWithoutAttack, uint256 recoveredWithAttack,\n"
     "                            uint256 treasuryWithoutAttack, uint256 treasuryWithAttack,\n"
@@ -2194,7 +2398,8 @@ _SWEEP_TRIAL = """    /// endowment={endow} wei, repetitions={repeats}, warp={wa
     }}
 """
 
-_VICTIM_ATTACKER_SETUP = """        atk = new Attacker(address(target));
+_VICTIM_ATTACKER_SETUP = """        arbRound += 1;
+        atk = new Attacker{{salt: keccak256(abi.encode(ARB_ATK_SALT, arbRound))}}(address(target));
         vm.deal(address(atk), {funding_wei});
         vm.deal(arbAtkEoa, {funding_wei});"""
 
@@ -2304,8 +2509,11 @@ _HARNESS_ACCOUNTS = ("arbEoa", "arbAtkEoa")
 _HARNESS_VICTIM = ("arbVictim", "arbiterVictim", "_ArbiterHarness")
 _HARNESS_FRAMES = ("arbSetup", "arbEnter", "arbExit", "arbDeploy", "arbAttack",
                    "arbTrial", "arbiterRun", "ARB_COMPLETED")
-# keccak256("arbiter.attacker") is arbAtkEoa; and the next CREATE address is the
-# attacker contract, which these cheatcodes would let setup compute.
+# keccak256("arbiter.attacker") was arbAtkEoa, and the harness's next CREATE address was
+# the attacker contract, which these cheatcodes let setup compute. Both are now closed
+# structurally (arbAtkEoa is drawn; the attacker is created with CREATE2 under a drawn
+# salt) -- a hand-built preimage or RLP address got past these names -- and the names stay
+# refused so the message is a clear one.
 _HARNESS_DERIVATIONS = re.compile(
     r"arbiter\.attacker"
     r"|\b(?:computeCreateAddress|computeCreate2Address)\s*\("
@@ -2347,6 +2555,373 @@ def _reject_harness_names(fragment: str, field: str, names: tuple[str, ...]) -> 
         "Attacker may still look the victim up at run time with "
         "_ArbiterHarness(msg.sender).arbiterVictim()."
     )
+
+
+# ---- composition checks added in the ME build; every one has a case in
+# ---- scripts/soundness_probe.py (or treasury_probe / eoa_identity_probe) that was
+# ---- ACCEPTED by forge before it existed.
+
+def _matching(code: str, open_idx: int) -> int:
+    """Index of the bracket closing the one at `open_idx` (comments/strings blanked)."""
+    depth = 0
+    for i in range(open_idx, len(code)):
+        if code[i] in "([{":
+            depth += 1
+        elif code[i] in ")]}":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _call_args(code: str, open_idx: int) -> list[str]:
+    """The top-level arguments of the call whose `(` is at `open_idx`."""
+    close = _matching(code, open_idx)
+    inner = code[open_idx + 1:close] if close > 0 else ""
+    args, depth, start = [], 0, 0
+    for i, ch in enumerate(inner):
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            args.append(inner[start:i].strip())
+            start = i + 1
+    if inner.strip():
+        args.append(inner[start:].strip())
+    return args
+
+
+def _reject_unbalanced(fragment: str, field: str) -> None:
+    """A fragment may not close what it did not open.
+
+    Every fragment but attacker_code is spliced into the body of a harness function, so a
+    stray `}` ends that function and whatever follows becomes a member of the TEST
+    contract: deploy_code "... } receive() external payable { target.sweep(...); } ..."
+    gave the test contract -- the vault's deployer and owner -- a receive() that swept the
+    vault to whoever sent it nothing, and that passed victim_loss against a correctly
+    guarded vault. attacker_code sits at file scope, where an unclosed `{` would swallow
+    the harness instead.
+    """
+    code = _blank_noncode(fragment or "")
+    closer = {")": "(", "]": "[", "}": "{"}
+    stack: list[str] = []
+    for ch in code:
+        if ch in "([{":
+            stack.append(ch)
+        elif ch in closer:
+            if not stack or stack[-1] != closer[ch]:
+                raise ValueError(
+                    f"{field} closes a {ch!r} it never opened. Each fragment is pasted "
+                    "into a function the harness writes, so it has to be complete "
+                    "statements with balanced (), [] and {} -- it cannot end that "
+                    "function or add members to the test contract.")
+            stack.pop()
+    if stack:
+        raise ValueError(
+            f"{field} leaves a {stack[-1]!r} unclosed. Each fragment has to be complete "
+            "statements with balanced (), [] and {}.")
+
+
+_TEST_FN_RE = re.compile(r"\bfunction\s+((?:test|invariant|statefulFuzz)\w*)\s*\(")
+
+
+def _reject_test_functions(attacker_code: str) -> None:
+    """attacker_code may not declare a test of its own.
+
+    forge runs every test function in the file, and a run counts as passed when ANY test
+    passes. A `contract TestFake { function testFake() ... }` that deployed the harness,
+    drove its frames and passed only when the attack had run, made a no-op attack on a
+    correctly guarded vault "PASS the harness predicate" -- the negation run, with the
+    attack removed, failed it, exactly as it would fail a real proof.
+    """
+    hit = _TEST_FN_RE.search(_blank_noncode(attacker_code or ""))
+    if hit:
+        raise ValueError(
+            f"attacker_code declares {hit.group(1)!r}. forge runs every function whose "
+            "name starts with test or invariant, and the harness's own test is the only "
+            "verdict there is -- rename it.")
+
+
+# Ways Solidity source can read bytecode. The harness's drawn accounts are constants of
+# the test contract, so code that runs before the attack -- setup, the victim's steps, the
+# owner's claim, the token expression, and any attacker_code helper they call -- could
+# recover them from `address(this).code` and appoint the attacker: measured, a library
+# that collected the PUSH20 operands of address(this).code made setup's setOwner() pick
+# arbEoa, and the sweep that followed passed victim_loss on a guarded vault. Comments and
+# strings are blanked first. `.code.length` (is this a contract?) reveals nothing.
+_CODE_READ_RE = re.compile(
+    r"\.\s*code\b(?!\s*\.\s*length\b)"
+    r"|\b(?:ext)?codecopy\b"
+    r"|\b(?:runtimeCode|getCode|getDeployedCode)\b"
+    r"|\bTestArbiter\w*"
+)
+
+
+def _reject_code_reading(fragment: str, field: str) -> None:
+    hit = _CODE_READ_RE.search(_blank_noncode(fragment or ""))
+    if hit:
+        raise ValueError(
+            f"{field} reads contract bytecode ({hit.group(0).strip()!r}). The harness "
+            "draws the attacker's and the victim's accounts into its own bytecode after "
+            "you write this, and code that can run before the attack -- setup, the "
+            "victim's steps, the owner's claim, and anything in attacker_code they could "
+            "call -- may not read them back. Only `.code.length` is allowed.")
+
+
+_APPROVE_RE = re.compile(
+    r"\.\s*(approve|increaseAllowance|safeApprove|safeIncreaseAllowance|forceApprove"
+    r"|setApprovalForAll|authorizeOperator|approveAndCall|permit)\s*(?:\{[^{}]*\}\s*)?\(")
+_SPENDER_RE = re.compile(r"^(?:(?:address|payable)\s*\(\s*)*([A-Za-z_]\w*)(?:\s*\))*$")
+
+
+def _reject_foreign_approval(fragment: str, field: str, bound: set[str]) -> None:
+    """The victim approves the contract under audit, or another contract setup built from
+    the audited code -- never one the agent wrote, and never an address it computed.
+
+    An allowance to agent code is the victim handing it their tokens: a public pull() on
+    an agent-written Router the victim had approved moved the victim's tokens to the
+    attacker and passed victim_loss on a correct vault, and a router that deposited them
+    into the target in its own name would hold the victim's position there.
+    """
+    code = _blank_noncode(fragment or "")
+    for m in _APPROVE_RE.finditer(code):
+        args = _call_args(code, m.end() - 1)
+        idx = 1 if m.group(1) == "permit" else 0
+        spender = args[idx] if len(args) > idx else ""
+        sm = _SPENDER_RE.match(spender)
+        if sm is None or sm.group(1) in bound or sm.group(1) in ("this", "msg", "tx", "block"):
+            raise ValueError(
+                f"{field} calls {m.group(1)}() for {spender or 'an unnamed spender'!r}. The "
+                "victim may approve the contract under audit (address(target)) or another "
+                "contract setup built from the audited code, named by its variable -- not a "
+                "contract your attacker_code declares and not a computed address: an "
+                "allowance is the victim handing over their tokens, and what agent-written "
+                "code then does with them is not the target's doing.")
+
+
+def _agent_kinds(attacker_code: str) -> dict[str, str]:
+    """Every name attacker_code declares at file scope, with what it is."""
+    code = _blank_noncode(attacker_code or "")
+    kinds: dict[str, str] = {}
+    depth = 0
+    for m in re.finditer(
+            r"[{}]|\b(?:abstract\s+)?(contract|interface|library|struct|enum)\s+([A-Za-z_]\w*)"
+            r"|\bfunction\s+([A-Za-z_]\w*)", code):
+        tok = m.group(0)
+        if tok == "{":
+            depth += 1
+        elif tok == "}":
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            if m.group(3):
+                kinds[m.group(3)] = "function"
+            else:
+                kinds[m.group(2)] = m.group(1)
+    return kinds
+
+
+def _holds_agent_contract(rhs: str, agent_contracts: set[str], tainted: set[str]) -> bool:
+    """Does this expression evaluate to a contract attacker_code declares?
+
+    Casts are looked through (`Vault(payable(address(new Evil())))` is an Evil), and so is
+    a call on such a contract (what an agent-written factory returns is the agent's). A
+    contract that merely takes one as an argument (`new Vault(IERC20(address(mock)))`) is
+    not one.
+    """
+    expr = rhs.strip()
+    while True:
+        m = re.match(r"([A-Za-z_]\w*)\s*\(", expr)
+        if not m or _matching(expr, m.end() - 1) != len(expr) - 1:
+            break
+        if m.group(1) in agent_contracts:
+            return True                                   # a cast to an agent contract
+        if m.group(1) in ("new", "type"):
+            break
+        expr = expr[m.end():-1].strip()                   # look through the cast
+    new = re.match(r"new\s+([A-Za-z_]\w*)", expr)
+    if new:
+        return new.group(1) in agent_contracts
+    root = re.match(r"([A-Za-z_]\w*)\s*(?:$|\.)", expr)
+    return bool(root) and root.group(1) in tainted
+
+
+def _agent_bound_names(deploy_code: str, agent_contracts: set[str]) -> set[str]:
+    """Setup variables that hold a contract attacker_code declares: declared with its
+    type, or assigned `new` of it, a cast to it, another such variable or what a call on
+    one returns. Assignments nested inside blocks are not followed (a documented gap)."""
+    tainted: set[str] = set()
+    if not agent_contracts:
+        return tainted
+    for stmt in _blank_noncode(deploy_code or "").split(";"):
+        m = re.match(r"\s*(?:([A-Za-z_][\w.]*(?:\[\])?)\s+"
+                     r"(?:(?:memory|storage|calldata|payable)\s+)*)?([A-Za-z_]\w*)\s*=(?!=)(.*)",
+                     stmt, re.S)
+        if not m:
+            continue
+        type_name, var, rhs = m.group(1) or "", m.group(2), m.group(3)
+        if type_name.split(".")[-1].rstrip("[]") in agent_contracts \
+                or _holds_agent_contract(rhs, agent_contracts, tainted):
+            tainted.add(var)
+    return tainted
+
+
+_PLAIN_CALL_RE = re.compile(r"\s*\.\s*[A-Za-z_]\w*\s*\(")     # `.f(` -- no {value: ...}
+
+
+def _reject_agent_custody(fragment: str, field: str, agent: dict[str, str],
+                          bound: set[str], exempt: set[str]) -> None:
+    """The victim may use code the agent wrote; it may not pay it or empower it.
+
+    Three shapes were each ACCEPTED on a correct target before this: the victim deposited
+    into a Bank in attacker_code that the attack swept; the victim approved an agent
+    Router with a public pull(); the victim named an agent Deputy as its withdrawer, and
+    the deputy, which anyone could drive, withdrew the victim's position from the target.
+    The trial's drain clause catches value parked in agent code, but not a position in
+    the target held by -- or delegated to -- agent code, because that one does leave the
+    target. So, in the victim's steps, a contract attacker_code declares (`bound`: setup
+    or victim variables holding one; or its type name) may be called with plain calls
+    (a mock token's faucet or approve, a mock pool's view), cast, or declared as a local
+    -- but may not receive value, appear as an argument to anything, or be created; and
+    agent libraries and free functions, which would run as the victim, are not called
+    at all. `exempt` is the measured token, which the victim is meant to hold.
+
+    Static, so an address laundered past it (stored as a plain `address`, read back from
+    the target, computed from a nonce) is not seen -- a documented gap.
+    """
+    code = _blank_noncode(fragment or "")
+    contracts = {n for n, k in agent.items() if k == "contract"} - exempt
+    for name, kind in agent.items():
+        if kind in ("library", "function") and re.search(
+                rf"(?<![\w$.]){re.escape(name)}(?![\w$])", code):
+            raise ValueError(
+                f"{field} calls {name!r}, which your attacker_code declares. Library and "
+                "free-function code would run as the victim; the victim's steps are calls "
+                "an ordinary user makes.")
+    new = re.search(r"\bnew\s+([A-Za-z_]\w*)", code)
+    if new and new.group(1) in contracts:
+        raise ValueError(
+            f"{field} creates {new.group(1)!r}, which your attacker_code declares. A "
+            "position the victim holds through a contract you wrote is held by your code.")
+
+    def refuse(name: str) -> None:
+        raise ValueError(
+            f"{field} sends value to, or passes along, {name!r} -- a contract your "
+            "attacker_code declares. The victim may call such a contract (a mock token's "
+            "faucet or approve, say), but may not pay it, approve it, or hand its "
+            "address to anything: that is the victim giving value or authority to code "
+            "you wrote, not a flaw in the contract under audit.")
+
+    for name in sorted((bound | contracts) - exempt):
+        for m in re.finditer(rf"(?<![\w$.]){re.escape(name)}(?![\w$])", code):
+            rest = code[m.end():]
+            if _PLAIN_CALL_RE.match(rest):
+                continue                              # a plain call on it
+            if name in bound and re.match(r"\s*=(?!=)", rest):
+                continue                              # being declared or assigned
+            if name in contracts:
+                if re.match(r"\s+(?:(?:memory|storage|calldata|payable)\s+)*"
+                            r"[A-Za-z_]\w*\s*=(?!=)", rest):
+                    continue                          # the type of a local declaration
+                paren = re.match(r"\s*\(", rest)
+                if paren:
+                    close = _matching(code, m.end() + paren.end() - 1)
+                    after = code[close + 1:] if close > 0 else ""
+                    if _PLAIN_CALL_RE.match(after):
+                        continue                      # a cast, called with a plain call
+                    if re.match(r"\s*;", after) and re.search(r"=\s*$", code[:m.start()]):
+                        continue                      # a cast, assigned to a local
+            refuse(name)
+
+
+# What the attack may not write in EOA mode, where attack_body runs inside the test
+# contract itself: the setup's variables (reassigning `target` sent the victim's exit to
+# an empty address and passed victim_loss) and the harness's own state.
+_HARNESS_STATE = ("arbTgt", "arbTok", "arbRevealed", "arbBusy", "arbGainAccounted",
+                  "arbRound", "arbPaidEther", "arbClaimPublic", "arbTreasuryRec")
+_ATTACK_FRAMES = tuple(n for n in _HARNESS_FRAMES if n != "ARB_COMPLETED") + (
+    "arbTreasuryExit", "arbTreasuryStranger", "arbEndPrank", "testArbiterVictimLoss")
+
+
+def _reject_harness_writes(fragment: str, field: str, names: set[str]) -> None:
+    code = _blank_noncode(fragment or "")
+    if re.search(r"\bassembly\b", code):
+        raise ValueError(
+            f"{field} contains inline assembly. In EOA mode the attack runs inside the "
+            "harness contract, where assembly could rewrite the harness's own storage.")
+    # A local the attack declares itself shadows the setup's variable of that name, and
+    # writing it is writing the local (a write placed BEFORE that declaration would reach
+    # the state variable, and is not told apart -- a documented gap).
+    own = {m.group(3) for m in DECL_RE.finditer(code) if m.group(1) not in _NOT_A_TYPE}
+    own |= set(hoist_tuple_locals(code)[0])
+    names = set(names) - own
+    if not names:
+        return
+    alt = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+    name = rf"(?<![\w$.])(?:{alt})(?![\w$])"
+    op = r"(?:[-+*/%|&^]|<<|>>)?=(?!=)"
+    pats = [
+        name + r"\s*(?:\[[^\]]*\]\s*|\.\s*[A-Za-z_]\w*\s*)*" + op,
+        name + r"\s*(?:\+\+|--)",
+        r"(?:\+\+|--)\s*" + name,
+        r"\bdelete\s+" + name,
+        name + r"\s*\.\s*(?:push|pop)\s*\(",
+    ]
+    hit = next((m for p in pats for m in [re.search(p, code)] if m), None)
+    if hit is None:
+        for t in re.finditer(r"\(([^()]*)\)\s*=(?!=)", code):
+            inner = re.search(name, t.group(1))
+            if inner:
+                hit = inner
+                break
+    if hit:
+        raise ValueError(
+            f"{field} writes {hit.group(0).strip()!r}, which belongs to the setup or the "
+            "harness. In EOA mode the attack runs inside the harness contract, so it could "
+            "simply reassign what the victim's exit and the measurement read -- an "
+            "attacker on a real chain cannot. Use your own local variables.")
+
+
+def _reject_harness_frames(fragment: str, field: str) -> None:
+    hit = re.search(
+        r"(?<![A-Za-z0-9_$])(" + "|".join(re.escape(n) for n in _ATTACK_FRAMES)
+        + r")(?![A-Za-z0-9_$])", _blank_noncode(fragment or ""))
+    if hit:
+        raise ValueError(
+            f"{field} refers to the harness frame {hit.group(1)!r}. The harness runs "
+            "setup, the victim's steps and the measurement; the attack may only make the "
+            "calls an attacker on a real chain could make.")
+
+
+_CAST_CALLS = re.compile(r"^(?:address|payable|u?int\d*|bytes\d*|type)$")
+
+
+def _reject_treasury_shape(treasury_exit: str) -> None:
+    """The owner's claim is ONE call on the contract under audit, and nothing else.
+
+    It is replayed by a stranger to see whether anybody could collect it, and what counts
+    is whose balance rose. A claim written as several statements could launder the
+    result: `uint256 s = address(target).balance; target.skim(); ...;
+    payable(address(this)).transfer(s);` forwarded what the stranger skimmed to the
+    owner, so the stranger's balance never rose, the public skim() read as the owner's
+    private claim, and a donation setup forced in passed as a drained treasury.
+    Arguments may be literals, names and casts (`payable(address(this))`); no calls.
+    """
+    code = _blank_noncode(treasury_exit or "").strip()
+    m = re.match(r"target\s*\.\s*[A-Za-z_]\w*\s*\(", code)
+    close = _matching(code, m.end() - 1) if m else -1
+    tail = code[close + 1:].strip() if close > 0 else "x"
+    inner = code[m.end():close] if close > 0 else ""
+    bad = (m is None or tail not in ("", ";") or re.search(r"[;{}]|\bnew\b", inner)
+           or any(c.group(1) or not _CAST_CALLS.match(c.group(2))
+                  for c in re.finditer(r"(\.\s*)?([A-Za-z_]\w*)\s*\(", inner)))
+    if bad:
+        raise ValueError(
+            "treasury_exit must be exactly one call on the contract under audit, such as "
+            "'target.withdrawFees(payable(address(this)));' -- the owner's own claim and "
+            "nothing around it: no other statements, no value, and no calls in its "
+            "arguments. The harness replays it as a stranger to see whether anybody "
+            "could collect it, and extra statements could hide whose money it was.")
 
 
 def _reject_forgery(fragment: str, field: str) -> None:
