@@ -235,6 +235,19 @@ def handler_get(path: str) -> tuple[int, str, bytes]:
     return int(lines[0].split()[1]), ctype, body
 
 
+def handler_redirect(path: str) -> tuple[int, str]:
+    """Handler.do_GET on an in-memory request: (status, Location header)."""
+    h = web.Handler.__new__(web.Handler)
+    h.path, h.command, h.request_version = path, "GET", "HTTP/1.1"
+    h.requestline, h.client_address = f"GET {path} HTTP/1.1", ("127.0.0.1", 0)
+    h.wfile, h.close_connection = io.BytesIO(), True
+    h.log_message = lambda *a: None  # type: ignore[method-assign]
+    h.do_GET()
+    lines = h.wfile.getvalue().partition(b"\r\n\r\n")[0].decode("latin-1").split("\r\n")
+    where = next((ln.split(":", 1)[1].strip() for ln in lines if ln.lower().startswith("location:")), "")
+    return int(lines[0].split()[1]), where
+
+
 # -- cases ------------------------------------------------------------------------------
 
 def real_cases() -> None:
@@ -673,7 +686,7 @@ def verify_routes(d: Path) -> None:
     (outside / "secret.js").write_text("SECRET", encoding="utf-8")
     (vdir / "link.js").symlink_to(outside / "secret.js")
     web.VERIFY_DIR, web.DEPLOYMENTS_DIR = vdir, deps
-    good = {"/verify": "text/html", "/verify/": "text/html", "/verify/verify.js": "text/javascript",
+    good = {"/verify/": "text/html", "/verify/verify.js": "text/javascript",
             "/verify/lib/keccak.js": "text/javascript", "/me/deployments/me-testnet.json": "application/json"}
     bad = ["/verify/../secret/secret.js", "/verify/%2e%2e/secret/secret.js", "/verify/..%2Fsecret%2Fsecret.js",
            "/verify//etc/passwd", "/verify/lib/../../secret/secret.js", "/verify/link.js", "/verify/.hidden.js",
@@ -684,12 +697,16 @@ def verify_routes(d: Path) -> None:
     ok_good = all(s == 200 and c.startswith(good[p]) for p, (s, c, _) in got_good.items())
     ok_bad = all(s == 404 and b"SECRET" not in body for s, _, body in got_bad.values())
     friendly = got_bad["/verify/link.js"][2].decode("utf-8")
+    # /verify (no slash) would resolve the page's relative style.css / app.js to /style.css: redirect, keep the query
+    ok_redirect = (handler_redirect("/verify") == (303, "/verify/")
+                   and handler_redirect("/verify?record=3") == (303, "/verify/?record=3"))
     web.VERIFY_DIR = d / "nowhere"
-    missing = handler_get("/verify")
-    ok = (ok_good and ok_bad and "找不到驗證頁的檔案" in friendly and missing[0] == 404
+    missing = handler_get("/verify/")
+    ok = (ok_good and ok_bad and ok_redirect and "找不到驗證頁的檔案" in friendly and missing[0] == 404
           and "找不到驗證頁的檔案" in missing[2].decode("utf-8"))
     leaked = [p for p, (s, _, b) in got_bad.items() if s != 404 or b"SECRET" in b]
-    check("verify_routes", ok, f"{len(good)} served, {len(bad)} refused with a zh-TW 404"
+    check("verify_routes", ok, f"{len(good)} served, /verify redirects to /verify/ (query kept) {ok_redirect}, "
+          f"{len(bad)} refused with a zh-TW 404"
           + (f"; LEAKED {leaked}" if leaked else ""))
 
 

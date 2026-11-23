@@ -211,7 +211,8 @@ DEPLOYMENTS_DIR = ME_DIR / "deployments"
 STATIC_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
                 ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
                 ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml",
-                ".png": "image/png", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8"}
+                ".png": "image/png", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8",
+                ".webm": "video/webm", ".mp4": "video/mp4"}
 _SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}")
 
 
@@ -593,8 +594,16 @@ class Handler(BaseHTTPRequestHandler):
         featured = sorted((r for r in runs if r["run_id"] in FEATURED_RUNS),
                           key=lambda r: FEATURED_RUNS.index(r["run_id"]))
         others = [r for r in runs if r["run_id"] not in FEATURED_RUNS]
+        # the home page's stat row counts ME testnet records and transactions from these files
+        me_docs = []
+        for name in ("me-testnet.demo.json", "me-testnet.json"):
+            try:
+                me_docs.append(json.loads((DEPLOYMENTS_DIR / name).read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                continue
         self._send(webui.render_index(message, featured, others, jobs.timing_history(),
-                                      IN_DEVELOPMENT, any(r["run_id"] in PLAYBACK_RUNS for r in runs)),
+                                      IN_DEVELOPMENT, any(r["run_id"] in PLAYBACK_RUNS for r in runs),
+                                      me_docs=me_docs),
                    status)
 
     def do_GET(self) -> None:  # noqa: N802
@@ -628,7 +637,11 @@ class Handler(BaseHTTPRequestHandler):
             job = jobs.load(m.group(1))
             if job:
                 return self._send(webui.render_chain(job, chain_runs(job["id"]), True))
-        if path in ("/verify", "/verify/") or path.startswith("/verify/"):
+        if path == "/verify":
+            # the page loads style.css / app.js relatively: without the slash they would resolve to /style.css
+            query = urlparse(self.path).query
+            return self._redirect("/verify/" + (f"?{query}" if query else ""))
+        if path.startswith("/verify/"):
             got = static_file(VERIFY_DIR, path[len("/verify/"):] or "index.html")
             if got is None:
                 return self._send(webui.render_missing(

@@ -1,14 +1,14 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="zh-Hant" class="vp-home">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdnjs.cloudflare.com 'sha256-2XY+wFeaOY21v2i2xUHat6K0ksP7XBGjKfSW/QH1oKw='; style-src 'self'; img-src 'self' data:; connect-src https: http:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdnjs.cloudflare.com 'sha256-2XY+wFeaOY21v2i2xUHat6K0ksP7XBGjKfSW/QH1oKw='; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src https: http:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
-<meta name="color-scheme" content="dark light">
+<meta name="color-scheme" content="light dark">
 <title>ARBITER Gate 紀錄驗證</title>
 <meta name="description" content="查證 ARBITER Gate 寫在 ME 鏈上的稽核紀錄：判定、證據雜湊、部署與來龍去脈。直接讀鏈，免安裝、免錢包。">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%238B7BFF'/%3E%3Cpath d='M9 9v8a7 7 0 0 0 14 0V9' fill='none' stroke='%23fff' stroke-width='3'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ff5a1f'/%3E%3Cpath d='M9 9v8a7 7 0 0 0 14 0V9' fill='none' stroke='%23fff' stroke-width='3'/%3E%3C/svg%3E">
 <script>(function(){var p=location.pathname;if(!/\/$/.test(p)&&!/\.[A-Za-z0-9]+$/.test(p))location.replace(p+"/"+location.search+location.hash);})();</script>
 <link rel="stylesheet" href="style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.5/ethers.umd.min.js" integrity="sha512-dj/EbePKIJrkhHMePgJ6ACP0v5whCZi+A8ot7WP+L0a3sPafqqWRiRhBBlGprs5hs5JjOYuTDlOic+qKc/s3mw==" crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
@@ -19,8 +19,9 @@
 <a class="skip" href="#main">跳到主要內容</a>
 <header class="top">
   <div class="wrap top-in">
-    <a class="brand" href="./"><span class="mark" aria-hidden="true"></span><span><b>ARBITER Gate</b><small>鏈上稽核紀錄驗證</small></span></a>
+    <a class="brand" href="./" aria-label="ARBITER Gate 鏈上稽核紀錄驗證"><span class="mark" aria-hidden="true"></span><span><b>ARBITER Gate</b><small>鏈上稽核紀錄驗證</small></span></a>
     <div class="top-r">
+      <a id="home-link" class="home-link" href="/" hidden>← 回首頁</a>
       <span id="net-pill" class="pill" role="status" aria-live="polite">準備中…</span>
       <button id="theme-btn" class="icon-btn" type="button" aria-label="切換深色或淺色">◐</button>
     </div>
@@ -30,12 +31,24 @@
 
 <main id="main" class="wrap">
   <section class="hero">
-    <p class="eyebrow" id="hero-net">ME Network · AuditRegistry</p>
-    <h1>這份合約稽核過嗎？結論是什麼？證據對得上嗎？</h1>
-    <p class="lead">ARBITER Gate 要求 AI 寫出真的能跑的攻擊程式，再用 AI 看不到的條件判定。每次稽核的判定和證據指紋都寫進 ME 鏈上的 AuditRegistry。這個頁面直接向鏈讀取，不經過我們的伺服器，不用安裝、不用錢包。</p>
+    <div class="hero-copy">
+      <p class="eyebrow" id="hero-net">ME Network · AuditRegistry</p>
+      <h1><span>這份合約稽核過嗎？</span><span>結論是什麼？證據對得上嗎？</span></h1>
+      <p class="lead">ARBITER Gate 要求 AI 寫出真的能跑的攻擊程式，再用 AI 看不到的條件判定。每次稽核的判定和證據指紋都寫進 ME 鏈上的 AuditRegistry。這個頁面直接向鏈讀取，不經過我們的伺服器，不用安裝、不用錢包。</p>
+    </div>
+    <figure class="hero-media">
+      <div class="hero-frame">
+        <video autoplay muted loop playsinline preload="metadata" poster="assets/hero-loop.png" aria-hidden="true">
+          <source src="assets/hero-loop.webm" type="video/webm">
+          <source src="assets/hero-loop.mp4" type="video/mp4">
+        </video>
+        <img class="hero-poster" src="assets/hero-loop.png" alt="" width="1280" height="800" loading="lazy" decoding="async">
+      </div>
+      <figcaption>ME 測試網上的實際紀錄：<a href="?record=3">紀錄 #3</a> 證實 StakingVault 可攻擊，鏈上拒絕部署；修補後的 <a href="?record=4">紀錄 #4</a> 經閘門部署。</figcaption>
+    </figure>
   </section>
 
-  <section class="card" aria-labelledby="lookup-h">
+  <section class="card lookup" aria-labelledby="lookup-h">
     <h2 id="lookup-h">查詢紀錄</h2>
     <form id="lookup-form" novalidate>
       <label for="q">合約地址、紀錄編號或交易雜湊</label>
@@ -50,6 +63,12 @@
     <p class="warnline" id="lib-warn"></p>
     <p class="warnline" id="param-warn" role="status"></p>
   </section>
+
+  <ol class="flow">
+    <li><b>稽核</b><span>要求 AI 寫出能執行的攻擊程式，再用 AI 看不到的條件判定。</span></li>
+    <li><b>上鏈</b><span>判定和證據指紋登錄到 ME 鏈上的 AuditRegistry，之後不能修改或刪除。</span></li>
+    <li><b>追問</b><span>任何人都能重算證據雜湊，或拿證據包裡的攻擊程式自己重跑。</span></li>
+  </ol>
 
   <div id="result" aria-live="polite"></div>
 

@@ -154,13 +154,21 @@
     return dl;
   }
   const loading = (text) => h("p", { class: "loading", role: "status" }, text);
+  /** Display only: the home view gets the big hero (html.vp-home, also in index.html for the first
+      paint); record, address, tx and source views keep the compact phase-1 header. */
+  function markView() {
+    const p = S.params || {};
+    document.documentElement.classList.toggle("vp-home", !(p.record || p.address || p.tx || p.source));
+  }
   /** Every view starts with what the page cannot vouch for, when there is anything (trustCard). */
   function setResult(...nodes) {
+    markView();
     const box = $("result");
     box.replaceChildren(...[trustCard(), ...nodes].filter(Boolean));
     box.removeAttribute("aria-busy");
   }
   function begin(text) {
+    markView();
     const run = ++S.run;
     const box = $("result");
     box.setAttribute("aria-busy", "true");
@@ -1395,7 +1403,26 @@
     });
   }
 
+  // The same page is served by the local ARBITER Gate web UI (at /verify/) and by GitHub Pages.
+  // Locally "home" is the web UI's front page; Pages has no front page, so it links the project's
+  // README on GitHub instead.
+  function setHomeLink() {
+    const a = $("home-link");
+    if (!a) return;
+    if (/^\/verify(\/|$)/.test(location.pathname)) {
+      a.href = "/";
+      a.textContent = "← 回首頁";
+    } else {
+      a.href = `${L.TOOL_REPO}/blob/me-hackathon/me/README.md`;
+      a.textContent = "← 專案首頁";
+      a.title = "ARBITER Gate 在 GitHub 上的專案說明";
+      a.rel = "noopener";
+    }
+    a.hidden = false;
+  }
+
   function start() {
+    setHomeLink();
     S.params = L.parseParams(location.search);
     applyTheme(S.params.theme || storedTheme());
     S.ethers = !!(window.ethers && window.ethers.keccak256 && window.ethers.id);
