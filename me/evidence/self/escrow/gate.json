@@ -1,0 +1,84 @@
+{
+ "schema": "arbiter-gate/0.1",
+ "generated_at": "2026-11-22T17:17:53+0800",
+ "tool_commit": "06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+ "tool_commit_source": "ARBITER_TOOL_COMMIT",
+ "input": {
+  "mode": "project",
+  "run_id": "fresh-escrow",
+  "workspace_mode": "repo",
+  "target": "src/AuditEscrow.sol",
+  "target_chosen_by": "user",
+  "candidates": [],
+  "llm_requests_this_invocation": 16,
+  "usage": {
+   "requests": 16,
+   "prompt_tokens": 208294,
+   "completion_tokens": 10051,
+   "cost_usd": 0.0,
+   "retries": 0,
+   "http_errors": 0,
+   "parse_failures": 0,
+   "reasoning_recoveries": 11,
+   "system_fingerprints": [
+    "fp_ollama"
+   ],
+   "models_seen": [
+    "arbiter-gpt:latest"
+   ]
+  },
+  "results": "fresh-escrow.results.jsonl",
+  "llm_requests_audit": 16,
+  "llm_requests_repair": 0,
+  "sandbox": {
+   "status": "on",
+   "image": "arbiter-sandbox:me1",
+   "container_start_s": 0.91,
+   "memory_peak_bytes": 33705984,
+   "network": "none",
+   "env": "PATH only",
+   "dep_cache": {
+    "ok": true,
+    "files": 2405
+   }
+  }
+ },
+ "models": [
+  "arbiter-gpt:latest"
+ ],
+ "patches_file": null,
+ "repair": true,
+ "exit_code": 0,
+ "files": [
+  {
+   "id": "project::src/AuditEscrow.sol",
+   "path": "AuditEscrow.sol",
+   "artifact": {
+    "uri": "src/AuditEscrow.sol",
+    "sha256": "a3037183485a46bbd300c15765845fc2a63121d3f2707cdbb0157a805da2eca0"
+   },
+   "verdict": "no_provable_attack",
+   "label": "未發現可證明攻擊（不等於安全）",
+   "reason": "agent_concluded_no_attack",
+   "detail": "",
+   "turns": 16,
+   "elapsed_s": 276.47,
+   "static_analysis": {
+    "status": "not_run",
+    "label": "靜態分析未執行",
+    "reason": "slither 沒有產生結果：  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+    "tool": "slither 0.11.6",
+    "solc": "0.8.24",
+    "threshold": "impact ≥ Medium 且 confidence ≥ Medium",
+    "findings_total": 0,
+    "hints": []
+   },
+   "fixture_note": "",
+   "static_hints": [],
+   "hint_note": "",
+   "findings": []
+  }
+ ],
+ "elapsed_s": 278.17,
+ "note": "已證實可攻擊的判定附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。"
+}

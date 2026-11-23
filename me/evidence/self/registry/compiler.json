@@ -1,0 +1,18 @@
+{
+ "constructorArgs": "0x",
+ "contract": "AuditRegistry",
+ "file": "AuditRegistry.sol",
+ "language": "Solidity",
+ "settings": {
+  "evmVersion": "paris",
+  "metadata": {
+   "appendCBOR": false,
+   "bytecodeHash": "none"
+  },
+  "optimizer": {
+   "enabled": true,
+   "runs": 200
+  }
+ },
+ "solc": "0.8.24+commit.e11b9ed9"
+}

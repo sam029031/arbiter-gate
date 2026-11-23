@@ -1,0 +1,44 @@
+{
+ "fileEntry": "project::src/AuditEscrow.sol",
+ "files": [
+  {
+   "name": "compiler.json",
+   "role": "compiler",
+   "sha256": "0xf5c6e19b1df8ae868dcbb806f9cb193ae48372131d72db56fd58ab43b32242e9"
+  },
+  {
+   "name": "gate.json",
+   "role": "gate_json",
+   "sha256": "0x1d6ff5a7676db024a95af2dfddecbcacad07ea6d089be2a3206234c5307ad9a9"
+  },
+  {
+   "name": "imports/AuditRegistry.sol",
+   "role": "compiler",
+   "sha256": "0xa4041806ecff3dcbaec14940862cdbffbba638491da32c95720c512cec6d9014"
+  },
+  {
+   "name": "src/AuditEscrow.sol",
+   "role": "source",
+   "sha256": "0xa3037183485a46bbd300c15765845fc2a63121d3f2707cdbb0157a805da2eca0"
+  }
+ ],
+ "gateVerdict": "no_provable_attack",
+ "patched": false,
+ "recordInput": {
+  "evidenceTier": 0,
+  "evidenceURI": "https://raw.githubusercontent.com/sam029031/arbiter-gate/me-hackathon/me/evidence/self/escrow",
+  "exploitHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "gateJsonHash": "0x1d6ff5a7676db024a95af2dfddecbcacad07ea6d089be2a3206234c5307ad9a9",
+  "initcodeHash": "0xb80f0eba233f227c5bfaa95b5ba350c5fe53fc6b8b62e88a2d7266f1d8cb9c80",
+  "model": "arbiter-gpt",
+  "parentId": 0,
+  "patchHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "predicateClass": 0,
+  "sourceHash": "0xa3037183485a46bbd300c15765845fc2a63121d3f2707cdbb0157a805da2eca0",
+  "toolCommit": "0x06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+  "verdict": 1
+ },
+ "schema": "arbiter-me-evidence/0.1",
+ "toolCommitDirty": false,
+ "toolCommitSource": "gate.json（ARBITER_TOOL_COMMIT）"
+}

@@ -1,0 +1,31 @@
+{
+  "network": "me-testnet",
+  "chainId": 400,
+  "rpc": "https://beta-hub-8545.explorer-testnet.me",
+  "explorer": "https://www.explorer-testnet.me",
+  "deployer": "0xbe51c98b205109e24bd4f3d26c7b0cb66c370700",
+  "auditors": [
+    "0xbe51c98b205109e24bd4f3d26c7b0cb66c370700"
+  ],
+  "registry": {
+    "address": "0xf619857eb017adc46d1dfeb8131979e1a97fb402",
+    "tx": "0x6d5324b15a9cf0b771d613e51fbc21502fc8da8afe7f02e96b4fef9f019906aa",
+    "block": 5469647,
+    "codehash": "0xaea66826c7f3656ba9bdb46a4a52df0ae7f22352643d7456c2e000473cbb4141"
+  },
+  "escrow": {
+    "address": "0x8014653f1122833bc925b1b8741a1a202c7b955f",
+    "tx": "0x47caa22ac73f588139cc8562835dcd8daffa38ccdca429cd5c8e76b9410ae9bb",
+    "block": 5469651,
+    "codehash": "0x27d74a184ad3bab606005d6a6e99aa8072b1c62275fbfa5e39e9064364ba87e6",
+    "deployedVia": "deployAudited",
+    "record": 2
+  },
+  "compiler": {
+    "solc": "0.8.24",
+    "evm_version": "paris",
+    "optimizer_runs": 200,
+    "metadata": "none"
+  },
+  "deployedAt": "2026-11-23T05:52:08+00:00"
+}

@@ -1,0 +1,21 @@
+{
+ "constructorArgs": "0x000000000000000000000000f619857eb017adc46d1dfeb8131979e1a97fb402",
+ "contract": "AuditEscrow",
+ "file": "AuditEscrow.sol",
+ "imports": {
+  "AuditRegistry.sol": "imports/AuditRegistry.sol"
+ },
+ "language": "Solidity",
+ "settings": {
+  "evmVersion": "paris",
+  "metadata": {
+   "appendCBOR": false,
+   "bytecodeHash": "none"
+  },
+  "optimizer": {
+   "enabled": true,
+   "runs": 200
+  }
+ },
+ "solc": "0.8.24+commit.e11b9ed9"
+}

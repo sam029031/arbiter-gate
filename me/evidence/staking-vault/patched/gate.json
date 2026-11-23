@@ -1,0 +1,609 @@
+{
+ "schema": "arbiter-gate/0.1",
+ "generated_at": "2026-11-22T17:10:05+0800",
+ "tool_commit": "06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+ "tool_commit_source": "ARBITER_TOOL_COMMIT",
+ "input": {
+  "mode": "file",
+  "file": "StakingVault.sol",
+  "run_id": "web-20261122-170447-45f419",
+  "workspace_mode": "repo",
+  "llm_requests_this_invocation": 14,
+  "usage": {
+   "requests": 6,
+   "prompt_tokens": 54590,
+   "completion_tokens": 4421,
+   "cost_usd": 0.0,
+   "retries": 0,
+   "http_errors": 0,
+   "parse_failures": 0,
+   "reasoning_recoveries": 5,
+   "system_fingerprints": [
+    "fp_ollama"
+   ],
+   "models_seen": [
+    "arbiter-gpt:latest"
+   ]
+  },
+  "results": "web-20261122-170447-45f419.results.jsonl",
+  "llm_requests_audit": 6,
+  "llm_requests_repair": 8,
+  "sandbox": {
+   "status": "on",
+   "image": "arbiter-sandbox:me1",
+   "container_start_s": 0.32,
+   "memory_peak_bytes": 53022720,
+   "network": "none",
+   "env": "PATH only",
+   "dep_cache": {
+    "ok": true,
+    "files": 2405
+   }
+  }
+ },
+ "models": [
+  "arbiter-gpt:latest"
+ ],
+ "patches_file": null,
+ "repair": true,
+ "exit_code": 1,
+ "files": [
+  {
+   "id": "file::StakingVault",
+   "path": "StakingVault.sol",
+   "artifact": {
+    "uri": "StakingVault.sol",
+    "sha256": "77c8b55471f4790dd114767722ca3d47fdbde3d11311a1e21275ce097b1baa08"
+   },
+   "verdict": "proven_exploitable",
+   "label": "已證實可攻擊（擋部署）",
+   "reason": "finding_submitted",
+   "detail": "",
+   "turns": 6,
+   "elapsed_s": 129.58,
+   "static_analysis": {
+    "status": "ran",
+    "label": "",
+    "reason": "",
+    "tool": "slither 0.11.6",
+    "solc": "0.8.20",
+    "threshold": "impact ≥ Medium 且 confidence ≥ Medium",
+    "findings_total": 4,
+    "hints": [
+     {
+      "check": "reentrancy-eth",
+      "impact": "High",
+      "confidence": "Medium",
+      "line": 20,
+      "end_line": 30,
+      "function": "unstake",
+      "message": "Reentrancy in StakingVault.unstake() (StakingVault.sol#20-30):"
+     }
+    ]
+   },
+   "fixture_note": "",
+   "static_hints": [],
+   "hint_note": "",
+   "findings": [
+    {
+     "title": "Re‑entrancy in unstake() allows draining of other users’ stakes",
+     "vulnerable_function": "unstake()",
+     "severity": "high",
+     "vuln_class": "reentrancy",
+     "poc_name": "StakingVaultReentrancyExploitPoc",
+     "offending_expression": "// Deliberate reentrancy bug: state is cleared after the external call.\n(bool ok, ) = msg.sender.call{value: amount}(\"\");\nrequire(ok, \"eth transfer failed\");\n\ntotalStaked -= amount;\nstakeOf[msg.sender] = 0;",
+     "attack_path": "StakingVault.sol",
+     "predicate": "victim_loss",
+     "predicate_strict": true,
+     "predicate_note": "",
+     "abg": {
+      "status": "measured",
+      "environments": [
+       {
+        "env": 0,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 0,
+        "rounds": 1,
+        "A": 1000000000000000000,
+        "B": 0,
+        "G": 2000000000000000000,
+        "unit": "wei"
+       },
+       {
+        "env": 1,
+        "endow_wei": 10000000000000000000000,
+        "warp_s": 0,
+        "rounds": 1,
+        "A": 1000000000000000000,
+        "B": 0,
+        "G": 2000000000000000000,
+        "unit": "wei"
+       },
+       {
+        "env": 2,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 604800,
+        "rounds": 1,
+        "A": 1000000000000000000,
+        "B": 0,
+        "G": 2000000000000000000,
+        "unit": "wei"
+       },
+       {
+        "env": 3,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 0,
+        "rounds": 8,
+        "A": 1000000000000000000,
+        "B": 0,
+        "G": 2000000000000000000,
+        "unit": "wei"
+       }
+      ],
+      "label": "已重現（合成層）"
+     },
+     "patch": {
+      "status": "verified",
+      "label": "修補已通過驗證（針對此攻擊）",
+      "origin": "repair",
+      "model": "arbiter-gpt:latest",
+      "rationale": "The reentrancy bug allowed the external call before state updates, enabling attackers to re-enter and drain funds. Moving the state updates (totalStaked and stakeOf) before the call follows the checks‑effects‑interactions pattern, preventing re‑entrancy while preserving normal functionality.",
+      "diff": "--- a/src/Target.sol\n+++ b/src/Target.sol\n@@ -17,15 +17,14 @@\n         totalStaked += msg.value;\n     }\n \n-    function unstake() external {\n-        uint256 amount = stakeOf[msg.sender];\n-        require(amount > 0, \"no position\");\n+function unstake() external {\n+    uint256 amount = stakeOf[msg.sender];\n+    require(amount > 0, \"no position\");\n+    // Fixed reentrancy: update state before external call.\n+    totalStaked -= amount;\n+    stakeOf[msg.sender] = 0;\n \n-        // Deliberate reentrancy bug: state is cleared after the external call.\n-        (bool ok, ) = msg.sender.call{value: amount}(\"\");\n-        require(ok, \"eth transfer failed\");\n-\n-        totalStaked -= amount;\n-        stakeOf[msg.sender] = 0;\n-    }\n+    (bool ok, ) = msg.sender.call{value: amount}(\"\");\n+    require(ok, \"eth transfer failed\");\n }\n+}\n",
+      "diff_ignore_whitespace": "--- a/src/Target.sol (whitespace ignored, display only)\n+++ b/src/Target.sol (whitespace ignored, display only)\n@@ -20,12 +20,11 @@\n function unstake() external {\n     uint256 amount = stakeOf[msg.sender];\n     require(amount > 0, \"no position\");\n+    // Fixed reentrancy: update state before external call.\n+    totalStaked -= amount;\n+    stakeOf[msg.sender] = 0;\n \n-        // Deliberate reentrancy bug: state is cleared after the external call.\n     (bool ok, ) = msg.sender.call{value: amount}(\"\");\n     require(ok, \"eth transfer failed\");\n-\n-        totalStaked -= amount;\n-        stakeOf[msg.sender] = 0;\n }\n }\n",
+      "changed_lines": 6,
+      "gate_checks": {
+       "0": "pass",
+       "L": "pass",
+       "3": "pass",
+       "1": "pass",
+       "2": "pass",
+       "4": "not_applicable",
+       "5": "not_diverse"
+      },
+      "after": [
+       {
+        "env": 0,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 0,
+        "rounds": 1,
+        "A": 1000000000000000000,
+        "B": 1000000000000000000,
+        "G": 0,
+        "unit": "wei"
+       },
+       {
+        "env": 1,
+        "endow_wei": 10000000000000000000000,
+        "warp_s": 0,
+        "rounds": 1,
+        "A": 1000000000000000000,
+        "B": 1000000000000000000,
+        "G": 0,
+        "unit": "wei"
+       },
+       {
+        "env": 2,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 604800,
+        "rounds": 1,
+        "A": 1000000000000000000,
+        "B": 1000000000000000000,
+        "G": 0,
+        "unit": "wei"
+       },
+       {
+        "env": 3,
+        "endow_wei": 10000000000000000000,
+        "warp_s": 0,
+        "rounds": 8,
+        "A": 1000000000000000000,
+        "B": 1000000000000000000,
+        "G": 0,
+        "unit": "wei"
+       }
+      ],
+      "timeline": [
+       {
+        "round": 1,
+        "side": "attack",
+        "source": "audit",
+        "result": "proven",
+        "poc_name": "StakingVaultReentrancyExploitPoc",
+        "hypothesis": "Attacker can re-enter unstake to withdraw more ether than its stake, draining victim's funds",
+        "abg": [
+         {
+          "env": 0,
+          "A": 1000000000000000000,
+          "B": 0,
+          "G": 2000000000000000000,
+          "honest_ran": true,
+          "attack_ran": true,
+          "unit": "wei"
+         },
+         {
+          "env": 1,
+          "A": 1000000000000000000,
+          "B": 0,
+          "G": 2000000000000000000,
+          "honest_ran": true,
+          "attack_ran": true,
+          "unit": "wei"
+         },
+         {
+          "env": 2,
+          "A": 1000000000000000000,
+          "B": 0,
+          "G": 2000000000000000000,
+          "honest_ran": true,
+          "attack_ran": true,
+          "unit": "wei"
+         },
+         {
+          "env": 3,
+          "A": 1000000000000000000,
+          "B": 0,
+          "G": 2000000000000000000,
+          "honest_ran": true,
+          "attack_ran": true,
+          "unit": "wei"
+         }
+        ],
+        "predicate": "victim_loss",
+        "fingerprint": {
+         "source": "trace",
+         "mode": "contract",
+         "entry": [
+          "stake()",
+          "unstake()"
+         ],
+         "reads": [],
+         "reentry": [
+          "unstake() -> unstake()"
+         ],
+         "callbacks": [
+          "unstake() -> receive/fallback"
+         ],
+         "third_party": [],
+         "value_sent": [
+          "stake()"
+         ],
+         "force_feed": false,
+         "donation": false,
+         "hook_calls": [
+          "unstake"
+         ],
+         "classes": [
+          "reentrancy"
+         ]
+        },
+        "finding": {
+         "title": "Re‑entrancy in unstake() allows draining of other users’ stakes",
+         "vulnerable_function": "unstake()",
+         "attack_path": "StakingVault.sol"
+        },
+        "label": "攻擊成功（已證實）"
+       },
+       {
+        "round": 1,
+        "side": "defend",
+        "proposals": 1,
+        "result": "accepted",
+        "diff": "--- a/src/Target.sol\n+++ b/src/Target.sol\n@@ -17,15 +17,14 @@\n         totalStaked += msg.value;\n     }\n \n-    function unstake() external {\n-        uint256 amount = stakeOf[msg.sender];\n-        require(amount > 0, \"no position\");\n+function unstake() external {\n+    uint256 amount = stakeOf[msg.sender];\n+    require(amount > 0, \"no position\");\n+    // Fixed reentrancy: update state before external call.\n+    totalStaked -= amount;\n+    stakeOf[msg.sender] = 0;\n \n-        // Deliberate reentrancy bug: state is cleared after the external call.\n-        (bool ok, ) = msg.sender.call{value: amount}(\"\");\n-        require(ok, \"eth transfer failed\");\n-\n-        totalStaked -= amount;\n-        stakeOf[msg.sender] = 0;\n-    }\n+    (bool ok, ) = msg.sender.call{value: amount}(\"\");\n+    require(ok, \"eth transfer failed\");\n }\n+}\n",
+        "rationale": "The reentrancy bug allowed the external call before state updates, enabling attackers to re-enter and drain funds. Moving the state updates (totalStaked and stakeOf) before the call follows the checks‑effects‑interactions pattern, preventing re‑entrancy while preserving normal functionality.",
+        "checks": {
+         "0": "pass",
+         "L": "pass",
+         "3": "pass",
+         "1": "pass",
+         "2": "pass",
+         "4": "not_applicable"
+        },
+        "label": "修補通過檢查"
+       },
+       {
+        "round": 2,
+        "side": "attack",
+        "source": "reattack",
+        "result": "not_proven",
+        "turns": 7,
+        "elapsed_s": 156.96,
+        "requests": 7,
+        "ruled_out": [
+         "Attacker can re-enter unstake to withdraw more ether than its stake, draining victim's funds"
+        ],
+        "tried": [
+         "Attacker re‑enters unstake() via receive() to withdraw more ether than its stake.",
+         "Attacker re-enters unstake via receive fallback to withdraw more than its stake."
+        ],
+        "reason": "",
+        "attempts": [
+         {
+          "name": "ReentrancyGuardTestExploitPoc",
+          "predicate": "victim_loss",
+          "hypothesis": "Attacker re‑enters unstake() via receive() to withdraw more ether than its stake.",
+          "compiled": true,
+          "passed": false,
+          "fingerprint": {
+           "source": "trace",
+           "mode": "contract",
+           "entry": [
+            "stake()",
+            "unstake()"
+           ],
+           "reads": [],
+           "reentry": [
+            "unstake() -> unstake()"
+           ],
+           "callbacks": [
+            "unstake() -> receive/fallback"
+           ],
+           "third_party": [],
+           "value_sent": [
+            "stake()"
+           ],
+           "force_feed": false,
+           "donation": false,
+           "hook_calls": [
+            "unstake"
+           ],
+           "classes": [
+            "reentrancy"
+           ]
+          },
+          "novelty": "same"
+         },
+         {
+          "name": "ReentrancyTestExploitPoc",
+          "predicate": "victim_loss",
+          "hypothesis": "Attacker re-enters unstake via receive fallback to withdraw more than its stake.",
+          "compiled": true,
+          "passed": false,
+          "fingerprint": {
+           "source": "trace",
+           "mode": "contract",
+           "entry": [
+            "unstake()"
+           ],
+           "reads": [],
+           "reentry": [],
+           "callbacks": [],
+           "third_party": [],
+           "value_sent": [],
+           "force_feed": false,
+           "donation": false,
+           "hook_calls": [
+            "unstake"
+           ],
+           "classes": [
+            "reentrancy"
+           ]
+          },
+          "novelty": "same"
+         }
+        ],
+        "novel": false,
+        "novelty": "same",
+        "audits": 2,
+        "label": "再攻擊：未成功（7 回合），但沒有換手法（不算通過）"
+       }
+      ],
+      "reattack": {
+       "enabled": true,
+       "max_turns": 16,
+       "status": "not_diverse",
+       "requests": 7,
+       "elapsed_s": 156.96,
+       "attacks": 1,
+       "attempts": [
+        {
+         "name": "ReentrancyGuardTestExploitPoc",
+         "predicate": "victim_loss",
+         "hypothesis": "Attacker re‑enters unstake() via receive() to withdraw more ether than its stake.",
+         "compiled": true,
+         "passed": false,
+         "fingerprint": {
+          "source": "trace",
+          "mode": "contract",
+          "entry": [
+           "stake()",
+           "unstake()"
+          ],
+          "reads": [],
+          "reentry": [
+           "unstake() -> unstake()"
+          ],
+          "callbacks": [
+           "unstake() -> receive/fallback"
+          ],
+          "third_party": [],
+          "value_sent": [
+           "stake()"
+          ],
+          "force_feed": false,
+          "donation": false,
+          "hook_calls": [
+           "unstake"
+          ],
+          "classes": [
+           "reentrancy"
+          ]
+         },
+         "novelty": "same"
+        },
+        {
+         "name": "ReentrancyTestExploitPoc",
+         "predicate": "victim_loss",
+         "hypothesis": "Attacker re-enters unstake via receive fallback to withdraw more than its stake.",
+         "compiled": true,
+         "passed": false,
+         "fingerprint": {
+          "source": "trace",
+          "mode": "contract",
+          "entry": [
+           "unstake()"
+          ],
+          "reads": [],
+          "reentry": [],
+          "callbacks": [],
+          "third_party": [],
+          "value_sent": [],
+          "force_feed": false,
+          "donation": false,
+          "hook_calls": [
+           "unstake"
+          ],
+          "classes": [
+           "reentrancy"
+          ]
+         },
+         "novelty": "same"
+        }
+       ],
+       "novel": false,
+       "novelty": "same",
+       "label": "修補後再攻擊 1 次（7 回合）未成功，但 AI 沒有換手法（同一手法換個寫法），所以檢查 5 不算通過"
+      },
+      "repo_tests": {
+       "status": "not_applicable",
+       "reason": "單一檔案，沒有專案自己的測試"
+      }
+     },
+     "region": {
+      "startLine": 20,
+      "endLine": 30,
+      "basis": "function_definition"
+     },
+     "regression": {
+      "status": "available",
+      "note": ""
+     },
+     "repair_usage": {
+      "requests": 8,
+      "elapsed_s": 179.55,
+      "rounds": 1,
+      "reattack_requests": 7,
+      "reattack_s": 156.96
+     },
+     "evidence": {
+      "reached": 2,
+      "rung2": {
+       "status": "pass",
+       "build": "legacy"
+      },
+      "rung3": {
+       "status": "fail",
+       "summary": {
+        "recovered_clean": 2000000000000000000,
+        "recovered_attacked": 2000000000000000000,
+        "attacker_gain": 0,
+        "shortfall": 0,
+        "proven": false
+       },
+       "worlds": [
+        {
+         "with_attack": false,
+         "recovered": 2000000000000000000,
+         "attacker_gain": 0,
+         "target_drained": 2000000000000000000,
+         "steps": [
+          {
+           "what": "deploy ArbWorld (setup)",
+           "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+           "tx": "0x4325a5c716c1b9a104311e3c8d17cc1c8aa6e9681d439df237ba8832233ac81e",
+           "gas_used": 0,
+           "ok": true,
+           "note": ""
+          },
+          {
+           "what": "enter()",
+           "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+           "tx": "0x8f09a9a647836f38fbba2619970954482e9bfc9176d3014611127df987839eb3",
+           "gas_used": 45821,
+           "ok": true,
+           "note": ""
+          },
+          {
+           "what": "exit()",
+           "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+           "tx": "0x2cdf09b947baf7d89fb45a7dfd5640abf5c2f943710f1700ca09b7bad2b5daf0",
+           "gas_used": 37168,
+           "ok": true,
+           "note": ""
+          }
+         ]
+        },
+        {
+         "with_attack": true,
+         "recovered": 2000000000000000000,
+         "attacker_gain": 0,
+         "target_drained": 2000000000000000000,
+         "steps": [
+          {
+           "what": "deploy ArbWorld (setup)",
+           "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+           "tx": "0x4325a5c716c1b9a104311e3c8d17cc1c8aa6e9681d439df237ba8832233ac81e",
+           "gas_used": 0,
+           "ok": true,
+           "note": ""
+          },
+          {
+           "what": "enter()",
+           "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+           "tx": "0x8f09a9a647836f38fbba2619970954482e9bfc9176d3014611127df987839eb3",
+           "gas_used": 45821,
+           "ok": true,
+           "note": ""
+          },
+          {
+           "what": "deploy AttackerFactory",
+           "actor": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+           "tx": "0x591d6f383d93fc4f39c5a6c868e3f152932ecec899e629f1efc3bdd7689e93de",
+           "gas_used": 0,
+           "ok": true,
+           "note": ""
+          },
+          {
+           "what": "build(address)",
+           "actor": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+           "tx": "0x92e0d6a70354621738863f78c3be506c038bf63e2b17bd0a1bbaba2d51956d1c",
+           "gas_used": 308217,
+           "ok": true,
+           "note": ""
+          },
+          {
+           "what": "run()",
+           "actor": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+           "tx": "",
+           "gas_used": 0,
+           "ok": false,
+           "note": "0000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000f61747461636b207265766572"
+          },
+          {
+           "what": "sweep()",
+           "actor": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+           "tx": "0x23af8aa2d54348892df706776de8c51f25d9ab89409c335512d079ac2cac5d67",
+           "gas_used": 36286,
+           "ok": true,
+           "note": ""
+          },
+          {
+           "what": "exit()",
+           "actor": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+           "tx": "0xf45e88144d7ac4bb2968727fe42a4de81e44c32b406a0ad90d98ede92842036f",
+           "gas_used": 37168,
+           "ok": true,
+           "note": ""
+          }
+         ]
+        }
+       ],
+       "reason": "有攻擊的那條鏈上，「run()」這筆交易失敗（revert）。受害者沒有攻擊時領回 2 ETH、有攻擊時領回 2 ETH，攻擊者獲利 0 ETH。"
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "elapsed_s": 316.87,
+ "note": "已證實可攻擊的判定附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。"
+}

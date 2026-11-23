@@ -1,0 +1,82 @@
+{
+ "schema": "arbiter-gate/0.1",
+ "generated_at": "2026-11-22T17:13:08+0800",
+ "tool_commit": "06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+ "tool_commit_source": "ARBITER_TOOL_COMMIT",
+ "input": {
+  "mode": "file",
+  "file": "AuditRegistry.sol",
+  "run_id": "fresh-registry",
+  "workspace_mode": "repo",
+  "llm_requests_this_invocation": 6,
+  "usage": {
+   "requests": 6,
+   "prompt_tokens": 69439,
+   "completion_tokens": 4493,
+   "cost_usd": 0.0,
+   "retries": 0,
+   "http_errors": 0,
+   "parse_failures": 0,
+   "reasoning_recoveries": 6,
+   "system_fingerprints": [
+    "fp_ollama"
+   ],
+   "models_seen": [
+    "arbiter-gpt:latest"
+   ]
+  },
+  "results": "fresh-registry.results.jsonl",
+  "llm_requests_audit": 6,
+  "llm_requests_repair": 0,
+  "sandbox": {
+   "status": "on",
+   "image": "arbiter-sandbox:me1",
+   "container_start_s": 0.42,
+   "memory_peak_bytes": 43999232,
+   "network": "none",
+   "env": "PATH only",
+   "dep_cache": {
+    "ok": true,
+    "files": 2405
+   }
+  }
+ },
+ "models": [
+  "arbiter-gpt:latest"
+ ],
+ "patches_file": null,
+ "repair": true,
+ "exit_code": 0,
+ "files": [
+  {
+   "id": "file::AuditRegistry",
+   "path": "AuditRegistry.sol",
+   "artifact": {
+    "uri": "AuditRegistry.sol",
+    "sha256": "a4041806ecff3dcbaec14940862cdbffbba638491da32c95720c512cec6d9014"
+   },
+   "verdict": "no_provable_attack",
+   "label": "未發現可證明攻擊（不等於安全）",
+   "reason": "agent_concluded_no_attack",
+   "detail": "",
+   "turns": 6,
+   "elapsed_s": 124.43,
+   "static_analysis": {
+    "status": "ran",
+    "label": "",
+    "reason": "",
+    "tool": "slither 0.11.6",
+    "solc": "0.8.24",
+    "threshold": "impact ≥ Medium 且 confidence ≥ Medium",
+    "findings_total": 2,
+    "hints": []
+   },
+   "fixture_note": "",
+   "static_hints": [],
+   "hint_note": "",
+   "findings": []
+  }
+ ],
+ "elapsed_s": 127.54,
+ "note": "已證實可攻擊的判定附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。"
+}

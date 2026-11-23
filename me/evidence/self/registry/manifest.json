@@ -1,0 +1,39 @@
+{
+ "fileEntry": "file::AuditRegistry",
+ "files": [
+  {
+   "name": "compiler.json",
+   "role": "compiler",
+   "sha256": "0x88bc0687c597be9b6dbf0c74559895a726602947986d7d92b70ba4e7cfe19f2c"
+  },
+  {
+   "name": "gate.json",
+   "role": "gate_json",
+   "sha256": "0x706d167600252ce62bd33f2b7c9950ea8e4cd94f300ea2663cc45fd02645f796"
+  },
+  {
+   "name": "src/AuditRegistry.sol",
+   "role": "source",
+   "sha256": "0xa4041806ecff3dcbaec14940862cdbffbba638491da32c95720c512cec6d9014"
+  }
+ ],
+ "gateVerdict": "no_provable_attack",
+ "patched": false,
+ "recordInput": {
+  "evidenceTier": 0,
+  "evidenceURI": "https://raw.githubusercontent.com/sam029031/arbiter-gate/me-hackathon/me/evidence/self/registry",
+  "exploitHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "gateJsonHash": "0x706d167600252ce62bd33f2b7c9950ea8e4cd94f300ea2663cc45fd02645f796",
+  "initcodeHash": "0xf743b2422672f9d55257e59bf82fdd12e7cd37e5f28bad254962e6500e1621ff",
+  "model": "arbiter-gpt",
+  "parentId": 0,
+  "patchHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "predicateClass": 0,
+  "sourceHash": "0xa4041806ecff3dcbaec14940862cdbffbba638491da32c95720c512cec6d9014",
+  "toolCommit": "0x06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+  "verdict": 1
+ },
+ "schema": "arbiter-me-evidence/0.1",
+ "toolCommitDirty": false,
+ "toolCommitSource": "gate.json（ARBITER_TOOL_COMMIT）"
+}

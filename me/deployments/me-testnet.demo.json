@@ -1,0 +1,269 @@
+{
+ "contracts": {
+  "registry": {
+   "address": "0xf619857eb017adc46d1dfeb8131979e1a97fb402",
+   "tx": "0x6d5324b15a9cf0b771d613e51fbc21502fc8da8afe7f02e96b4fef9f019906aa",
+   "block": 5469647,
+   "codehash": "0xaea66826c7f3656ba9bdb46a4a52df0ae7f22352643d7456c2e000473cbb4141"
+  }
+ },
+ "registry": "0xf619857eb017adc46d1dfeb8131979e1a97fb402",
+ "self": {
+  "mode": "fresh",
+  "registry": {
+   "gate": {
+    "file": "AuditRegistry.gate.json",
+    "sha256": "0x706d167600252ce62bd33f2b7c9950ea8e4cd94f300ea2663cc45fd02645f796",
+    "generatedAt": "2026-11-22T17:13:08+0800",
+    "toolCommit": "06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+    "toolCommitSource": "ARBITER_TOOL_COMMIT",
+    "model": "arbiter-gpt",
+    "mode": "file",
+    "entry": "file::AuditRegistry",
+    "gateVerdict": "no_provable_attack",
+    "verdict": 1,
+    "auditedSha256": "0xa4041806ecff3dcbaec14940862cdbffbba638491da32c95720c512cec6d9014",
+    "source": "me/contracts/src/AuditRegistry.sol",
+    "sourceSha256": "0xa4041806ecff3dcbaec14940862cdbffbba638491da32c95720c512cec6d9014",
+    "stale": false
+   },
+   "input": {
+    "sourceHash": "0xa4041806ecff3dcbaec14940862cdbffbba638491da32c95720c512cec6d9014",
+    "initcodeHash": "0xf743b2422672f9d55257e59bf82fdd12e7cd37e5f28bad254962e6500e1621ff",
+    "verdict": 1,
+    "predicateClass": 0,
+    "evidenceTier": 0,
+    "gateJsonHash": "0x706d167600252ce62bd33f2b7c9950ea8e4cd94f300ea2663cc45fd02645f796",
+    "exploitHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "patchHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "parentId": 0,
+    "toolCommit": "0x06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+    "model": "arbiter-gpt",
+    "evidenceURI": "https://raw.githubusercontent.com/sam029031/arbiter-gate/me-hackathon/me/evidence/self/registry"
+   },
+   "notes": [
+    "toolCommit 來源：gate.json（ARBITER_TOOL_COMMIT）"
+   ],
+   "record": {
+    "id": 1,
+    "tx": "0x838ffdd05389b7353cf26ace5e438090c4b3bbf3480dbc2cea9f48d790770080",
+    "block": 5469648,
+    "auditor": "0xbe51c98b205109e24bd4f3d26c7b0cb66c370700",
+    "cosmosTx": "378A03E00F863A79291B707D2A672C8AE29D6B4F7092FB76622FCE388351F658"
+   },
+   "link": {
+    "address": "0xf619857eb017adc46d1dfeb8131979e1a97fb402",
+    "codehash": "0xaea66826c7f3656ba9bdb46a4a52df0ae7f22352643d7456c2e000473cbb4141",
+    "expectedCodehash": "0xaea66826c7f3656ba9bdb46a4a52df0ae7f22352643d7456c2e000473cbb4141",
+    "codehashMatches": true,
+    "tx": "0x30fc8fc11bdf14b7fcaa6cfa965cc04eb7d26f737f685d51d8a0d0515f072c42",
+    "linkKind": 1,
+    "status": "claimed",
+    "block": 5469649,
+    "runtimeCodeHash": "0xaea66826c7f3656ba9bdb46a4a52df0ae7f22352643d7456c2e000473cbb4141",
+    "reason": "",
+    "cosmosTx": "5FAC0A40F0F29578E679D5CC091001BB71F940BFEEE8AD361241494E6241F55A"
+   }
+  },
+  "escrow": {
+   "gate": {
+    "file": "AuditEscrow.gate.json",
+    "sha256": "0x1d6ff5a7676db024a95af2dfddecbcacad07ea6d089be2a3206234c5307ad9a9",
+    "generatedAt": "2026-11-22T17:17:53+0800",
+    "toolCommit": "06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+    "toolCommitSource": "ARBITER_TOOL_COMMIT",
+    "model": "arbiter-gpt",
+    "mode": "project",
+    "entry": "project::src/AuditEscrow.sol",
+    "gateVerdict": "no_provable_attack",
+    "verdict": 1,
+    "auditedSha256": "0xa3037183485a46bbd300c15765845fc2a63121d3f2707cdbb0157a805da2eca0",
+    "source": "me/contracts/src/AuditEscrow.sol",
+    "sourceSha256": "0xa3037183485a46bbd300c15765845fc2a63121d3f2707cdbb0157a805da2eca0",
+    "stale": false
+   },
+   "input": {
+    "sourceHash": "0xa3037183485a46bbd300c15765845fc2a63121d3f2707cdbb0157a805da2eca0",
+    "initcodeHash": "0xb80f0eba233f227c5bfaa95b5ba350c5fe53fc6b8b62e88a2d7266f1d8cb9c80",
+    "verdict": 1,
+    "predicateClass": 0,
+    "evidenceTier": 0,
+    "gateJsonHash": "0x1d6ff5a7676db024a95af2dfddecbcacad07ea6d089be2a3206234c5307ad9a9",
+    "exploitHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "patchHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "parentId": 0,
+    "toolCommit": "0x06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+    "model": "arbiter-gpt",
+    "evidenceURI": "https://raw.githubusercontent.com/sam029031/arbiter-gate/me-hackathon/me/evidence/self/escrow"
+   },
+   "notes": [
+    "toolCommit 來源：gate.json（ARBITER_TOOL_COMMIT）"
+   ],
+   "record": {
+    "id": 2,
+    "tx": "0x8a20f9fecf2a0bca4bd62ede1e3d6ca7b72c952fdc531fd462d7e0feceef163b",
+    "block": 5469650,
+    "auditor": "0xbe51c98b205109e24bd4f3d26c7b0cb66c370700",
+    "cosmosTx": "1116539B16F6C2A9645935B7C69297CD9C5D64D6262FE64537410805AB4F880F"
+   },
+   "deploy": {
+    "status": "deployed",
+    "reason": "",
+    "address": "0x8014653f1122833bc925b1b8741a1a202c7b955f",
+    "tx": "0x47caa22ac73f588139cc8562835dcd8daffa38ccdca429cd5c8e76b9410ae9bb",
+    "linkKind": 2,
+    "runtimeCodeHash": "0x27d74a184ad3bab606005d6a6e99aa8072b1c62275fbfa5e39e9064364ba87e6",
+    "predicted": "0x8014653f1122833bc925b1b8741a1a202c7b955f",
+    "salt": "0x0000000000000000000000000000000000000000000000000000000000000002",
+    "checks": {
+     "predicted_address": true,
+     "codehash_matches_event": true,
+     "link_gated": true,
+     "runtime_matches_artifact": true
+    },
+    "cosmosTx": "705D701A37AC3CA952DD52CA3EBDA695274FDC63348DAA80103A96753B892D19",
+    "block": 5469651,
+    "deployedVia": "deployAudited"
+   }
+  }
+ },
+ "escrow": {
+  "id": 1,
+  "fee_wei": "1000000000000000",
+  "status": "open",
+  "deadline": 1796017927,
+  "tx": "0xe5b3cbc4426975e3de019c92cdf00064b16001fad3ce8451ebce21a495841813",
+  "cosmosTx": "B02055E0A2CE87464AA323ECC5AA67F165B18BB3750E0C39F6E173A8297FDAF2",
+  "contract": "0x8014653f1122833bc925b1b8741a1a202c7b955f",
+  "settle": {
+   "id": 1,
+   "fee_wei": "1000000000000000",
+   "status": "paid",
+   "settleTx": "0xe445619d1ed093b0f567e1206faf325bc3750c6169b8c341fd2bc421a2c79500",
+   "recordId": 3,
+   "recipient": "0xbe51c98b205109e24bd4f3d26c7b0cb66c370700",
+   "cosmosTx": "E84A5A759A1BCE81EA12B31D245C0EACAA3BA0113331A99D9857F10F8051358E"
+  }
+ },
+ "blocked": {
+  "record": {
+   "id": 3,
+   "tx": "0x04ed7518f071d2bb20dc1889f00285e29d89866a02b2bcf7e2d9104a688bba3d",
+   "block": 5469653,
+   "auditor": "0xbe51c98b205109e24bd4f3d26c7b0cb66c370700",
+   "cosmosTx": "50B0F9B5DC2E605BD2CDB212B78462FE9AE851DD2A1E47B82C027CFD170B23D6"
+  },
+  "gate": {
+   "file": "gate.json",
+   "sha256": "0xe1e29262ce4ba8ae67fb4896e7e2ed962ebfb0a8a9d2dfe0f2bee066d03ee42c",
+   "generatedAt": "2026-11-22T17:10:05+0800",
+   "toolCommit": "06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+   "toolCommitSource": "ARBITER_TOOL_COMMIT",
+   "model": "arbiter-gpt",
+   "mode": "file",
+   "entry": "file::StakingVault",
+   "gateVerdict": "proven_exploitable",
+   "verdict": 3,
+   "auditedSha256": "0x77c8b55471f4790dd114767722ca3d47fdbde3d11311a1e21275ce097b1baa08"
+  },
+  "input": {
+   "sourceHash": "0x77c8b55471f4790dd114767722ca3d47fdbde3d11311a1e21275ce097b1baa08",
+   "initcodeHash": "0x8c3df937afef7d0d1d2fe140b2496e188e2c130a1313c237abed58ecccf6f641",
+   "verdict": 3,
+   "predicateClass": 2,
+   "evidenceTier": 2,
+   "gateJsonHash": "0xe1e29262ce4ba8ae67fb4896e7e2ed962ebfb0a8a9d2dfe0f2bee066d03ee42c",
+   "exploitHash": "0x0ee846eeff3ec5733d100fcc686775058b7058116c53492b8685cc7702219787",
+   "patchHash": "0x54191ef61bcde92d37a905f8985b58f0ae66ea24da728bdd68c5ecfda08485f0",
+   "parentId": 0,
+   "toolCommit": "0x06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+   "model": "arbiter-gpt",
+   "evidenceURI": "https://raw.githubusercontent.com/sam029031/arbiter-gate/me-hackathon/me/evidence/staking-vault/original"
+  },
+  "deploy": {
+   "status": "blocked",
+   "reason": "登錄合約拒絕部署：這筆紀錄的判定是 3（已證實可攻擊）（NotDeployable(3)）",
+   "error": "NotDeployable",
+   "errorArgs": [
+    3
+   ],
+   "address": null,
+   "tx": "0x117d13432572f4be627a826486dee46295d657907835f0a4b008e10a58d26350",
+   "linkKind": 0,
+   "runtimeCodeHash": null,
+   "txStatus": "0x0",
+   "cosmosTx": "2C8A11D0ADDA2835BF1A6C61925989EDCC22A74AB872E4122ED7DA7CC908D5C5",
+   "preflight": {
+    "ok": true,
+    "gas": 207067,
+    "error": null
+   }
+  },
+  "sidecars": [
+   "me.json",
+   "5d06d10143a0.me.json"
+  ]
+ },
+ "patched": {
+  "record": {
+   "id": 4,
+   "tx": "0xcf2df1daf4768040e983a0ea2c9311a65d19d1bf5436eaf069682c6f13ad29bc",
+   "block": 5469656,
+   "auditor": "0xbe51c98b205109e24bd4f3d26c7b0cb66c370700",
+   "cosmosTx": "56840162E5501F1934BD789F5C759579456459DB4F2548F16D055F50A2066D33"
+  },
+  "gate": {
+   "file": "gate.json",
+   "sha256": "0xe1e29262ce4ba8ae67fb4896e7e2ed962ebfb0a8a9d2dfe0f2bee066d03ee42c",
+   "generatedAt": "2026-11-22T17:10:05+0800",
+   "toolCommit": "06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+   "toolCommitSource": "ARBITER_TOOL_COMMIT",
+   "model": "arbiter-gpt",
+   "mode": "file",
+   "entry": "file::StakingVault",
+   "gateVerdict": "proven_exploitable",
+   "verdict": 3,
+   "auditedSha256": "0x77c8b55471f4790dd114767722ca3d47fdbde3d11311a1e21275ce097b1baa08"
+  },
+  "input": {
+   "sourceHash": "0x99011984008c15764bd2710401e2cf3ac99b4e45da7918a388d66990b45cf76e",
+   "initcodeHash": "0x9ec393a5921d33ffcd2f5308a202f703d514be1ff18be771f8a0a0ce9ba510ee",
+   "verdict": 1,
+   "predicateClass": 0,
+   "evidenceTier": 0,
+   "gateJsonHash": "0xe1e29262ce4ba8ae67fb4896e7e2ed962ebfb0a8a9d2dfe0f2bee066d03ee42c",
+   "exploitHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "patchHash": "0x54191ef61bcde92d37a905f8985b58f0ae66ea24da728bdd68c5ecfda08485f0",
+   "parentId": 3,
+   "toolCommit": "0x06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+   "model": "arbiter-gpt",
+   "evidenceURI": "https://raw.githubusercontent.com/sam029031/arbiter-gate/me-hackathon/me/evidence/staking-vault/patched"
+  },
+  "deploy": {
+   "status": "deployed",
+   "reason": "",
+   "address": "0x86e3e9e68b402537f76806e735167237873a2f3c",
+   "tx": "0x186dd32eb1f4103c5c5be9d9268fb202466f7b0aba1d992b454b4ed81bc9b98a",
+   "linkKind": 2,
+   "runtimeCodeHash": "0xfccdf22fa02846ced331f2ac86f83f39d40beadc8084a5a396358f8059f6274f",
+   "predicted": "0x86e3e9e68b402537f76806e735167237873a2f3c",
+   "salt": "0x0000000000000000000000000000000000000000000000000000000000000004",
+   "checks": {
+    "predicted_address": true,
+    "codehash_matches_event": true,
+    "link_gated": true,
+    "codehash_matches_build": true
+   },
+   "cosmosTx": "B2B44CA7C6FE4E3A756E9B7077138F1A547B31EAD486F5D5C423BCC57557D22E",
+   "preflight": {
+    "ok": true,
+    "gas": 206863,
+    "error": null
+   }
+  },
+  "sidecars": [
+   "me.json",
+   "5d06d10143a0.me.json"
+  ]
+ }
+}

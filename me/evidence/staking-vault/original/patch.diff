@@ -1,0 +1,27 @@
+--- a/src/StakingVault.sol
++++ b/src/StakingVault.sol
+@@ -17,15 +17,14 @@
+         totalStaked += msg.value;
+     }
+ 
+-    function unstake() external {
+-        uint256 amount = stakeOf[msg.sender];
+-        require(amount > 0, "no position");
++function unstake() external {
++    uint256 amount = stakeOf[msg.sender];
++    require(amount > 0, "no position");
++    // Fixed reentrancy: update state before external call.
++    totalStaked -= amount;
++    stakeOf[msg.sender] = 0;
+ 
+-        // Deliberate reentrancy bug: state is cleared after the external call.
+-        (bool ok, ) = msg.sender.call{value: amount}("");
+-        require(ok, "eth transfer failed");
+-
+-        totalStaked -= amount;
+-        stakeOf[msg.sender] = 0;
+-    }
++    (bool ok, ) = msg.sender.call{value: amount}("");
++    require(ok, "eth transfer failed");
+ }
++}

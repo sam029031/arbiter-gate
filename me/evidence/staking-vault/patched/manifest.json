@@ -1,0 +1,59 @@
+{
+ "fileEntry": "file::StakingVault",
+ "files": [
+  {
+   "name": "compiler.json",
+   "role": "compiler",
+   "sha256": "0x52983299e3e5dbfcfab8d28dd15862c1352ab77c286b4ecfcf383d02a3f05a14"
+  },
+  {
+   "name": "exploit/StakingVaultReentrancyExploitPoc.t.sol",
+   "role": "exploit",
+   "sha256": "0x0ee846eeff3ec5733d100fcc686775058b7058116c53492b8685cc7702219787"
+  },
+  {
+   "name": "gate.json",
+   "role": "gate_json",
+   "sha256": "0xe1e29262ce4ba8ae67fb4896e7e2ed962ebfb0a8a9d2dfe0f2bee066d03ee42c"
+  },
+  {
+   "name": "parent_src/StakingVault.sol",
+   "role": "parent_source",
+   "sha256": "0x77c8b55471f4790dd114767722ca3d47fdbde3d11311a1e21275ce097b1baa08"
+  },
+  {
+   "name": "patch.diff",
+   "role": "patch",
+   "sha256": "0x54191ef61bcde92d37a905f8985b58f0ae66ea24da728bdd68c5ecfda08485f0"
+  },
+  {
+   "name": "regression.zip",
+   "role": "regression",
+   "sha256": "0x4797fc8a8581113294a0e992c3854b167ad73b6b14600ace6c97bf834d6d6b2c"
+  },
+  {
+   "name": "src/StakingVault.sol",
+   "role": "source",
+   "sha256": "0x99011984008c15764bd2710401e2cf3ac99b4e45da7918a388d66990b45cf76e"
+  }
+ ],
+ "gateVerdict": "proven_exploitable",
+ "patched": true,
+ "recordInput": {
+  "evidenceTier": 0,
+  "evidenceURI": "https://raw.githubusercontent.com/sam029031/arbiter-gate/me-hackathon/me/evidence/staking-vault/patched",
+  "exploitHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "gateJsonHash": "0xe1e29262ce4ba8ae67fb4896e7e2ed962ebfb0a8a9d2dfe0f2bee066d03ee42c",
+  "initcodeHash": "0x9ec393a5921d33ffcd2f5308a202f703d514be1ff18be771f8a0a0ce9ba510ee",
+  "model": "arbiter-gpt",
+  "parentId": 3,
+  "patchHash": "0x54191ef61bcde92d37a905f8985b58f0ae66ea24da728bdd68c5ecfda08485f0",
+  "predicateClass": 0,
+  "sourceHash": "0x99011984008c15764bd2710401e2cf3ac99b4e45da7918a388d66990b45cf76e",
+  "toolCommit": "0x06ca8ddc5747c249d147218a7b57b6ec70bda1a7",
+  "verdict": 1
+ },
+ "schema": "arbiter-me-evidence/0.1",
+ "toolCommitDirty": false,
+ "toolCommitSource": "gate.json（ARBITER_TOOL_COMMIT）"
+}

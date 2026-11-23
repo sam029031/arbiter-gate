@@ -145,12 +145,30 @@ def pick_entry(report: dict, source_sha: str | None = None, file_id: str | None 
     raise ChainError("gate.json 有多個檔案；用 --file 指定（id 或索引）")
 
 
-def results_row(report: dict, sample_id: str, results: Path | None = None) -> dict | None:
-    raw = str(results) if results else (report.get("input") or {}).get("results")
+def results_path(report: dict, results: Path | None = None) -> Path | None:
+    """The run's results.jsonl. gate.json keeps a path under arbiter/ relative and reduces any
+    other path to its file name (public_report), e.g. when the run folder sat behind a symlink;
+    so a bare name is also looked up in the run's own folder runs/gate/<run_id>/ and in runs/."""
+    if results:
+        rp = Path(results)
+        return next((c for c in ([rp] if rp.is_absolute() else [rp, ARBITER_DIR / rp]) if c.is_file()), None)
+    inp = report.get("input") or {}
+    raw = inp.get("results")
     if not raw:
         return None
-    path = Path(raw) if Path(raw).is_absolute() else ARBITER_DIR / raw
-    if not path.exists():
+    raw_path = Path(raw)
+    if raw_path.is_absolute():
+        return raw_path if raw_path.exists() else None
+    cands = [ARBITER_DIR / raw_path]
+    run_id = str(inp.get("run_id") or raw_path.name.removesuffix(".results.jsonl"))
+    if len(raw_path.parts) == 1 and run_id and "/" not in run_id and run_id not in (".", ".."):
+        cands += [ARBITER_DIR / "runs" / "gate" / run_id / raw_path.name, ARBITER_DIR / "runs" / raw_path.name]
+    return next((c for c in cands if c.is_file()), None)
+
+
+def results_row(report: dict, sample_id: str, results: Path | None = None) -> dict | None:
+    path = results_path(report, results)
+    if path is None:
         return None
     for line in path.read_text(encoding="utf-8").splitlines():
         if line.strip() and (row := json.loads(line)).get("sample_id") == sample_id:
