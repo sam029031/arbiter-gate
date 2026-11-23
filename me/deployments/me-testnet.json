@@ -27,5 +27,8 @@
     "optimizer_runs": 200,
     "metadata": "none"
   },
-  "deployedAt": "2026-11-23T05:52:08+00:00"
+  "deployedAt": "2026-11-23T05:52:08+00:00",
+  "publicToolCommits": [
+    "06ca8ddc5747c249d147218a7b57b6ec70bda1a7"
+  ]
 }

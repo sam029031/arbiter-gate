@@ -6,11 +6,11 @@
 
 | | 位置 |
 |---|---|
-| 這次新增與改進（評審請看這裡） | [第 4 節](#4-11-月新增與改進評審請看這裡)；完整差異：`git diff me-hackathon-base..me-hackathon` |
-| 線上驗證頁（不用錢包、不用安裝） | `me/web/verify/`（託管網址見 [第 5 節](#5-體驗方式)） |
+| 這次新增與改進（評審請看這裡） | [第 4 節](#4-11-月新增與改進評審請看這裡)；完整差異：[main...me-hackathon](https://github.com/sam029031/arbiter-gate/compare/main...me-hackathon)（公開 repo 的 `main` ＝ InnoServe 決賽版） |
+| 線上驗證頁（不用錢包、不用安裝） | https://sam029031.github.io/arbiter-gate/me/web/verify/ （原始碼 `me/web/verify/`） |
 | ME 測試網上的合約與交易 | [`me/EVIDENCE.md`](EVIDENCE.md)（每筆交易註明對應的功能） |
 | 指令與工具細節 | [`me/docs/TOOLS.md`](docs/TOOLS.md) |
-| 原有基礎（InnoServe 2026 決賽版） | `innoserve/README.md`、tag `me-hackathon-base` |
+| 原有基礎（InnoServe 2026 決賽版） | `innoserve/README.md`；公開 repo 的 `main` 分支 |
 
 ---
 
@@ -63,7 +63,7 @@ ME 測試網連線資訊：EVM JSON-RPC `https://beta-hub-8545.explorer-testnet.
 - `arbiter_me/`：從 gate.json 產生紀錄與可重現的證據資料夾、登記、經由閘門部署、驗證（`--evidence`、`--rebuild`、`--replay`）、託管、0x ↔ me1 位址換算、ME 區塊瀏覽器的 Cosmos 雜湊換算；只用 Python 標準函式庫＋Foundry。
 - `web/verify/`：靜態驗證頁（桌機與手機），讀 ME 測試網或本機 anvil。
 - 網頁結果頁新增「鏈上紀錄」卡片（判定 → 鏈上拒絕部署 → 修補 → 部署的時間軸）；本機網頁可直接開 `/verify`。
-- `scripts/me_live_demo.sh`：一行指令在 ME 測試網完成整個示範，並寫出 `EVIDENCE.md`；`scripts/me_registry_probe.py`：在本機鏈上把同樣流程跑一遍的端到端檢查（54 項，含實鏈示範的排練）。
+- `scripts/me_live_demo.sh`：一行指令在 ME 測試網完成整個示範，並寫出 `EVIDENCE.md`；`scripts/me_registry_probe.py`：在本機鏈上把同樣流程跑一遍的端到端檢查（79 項，含實鏈示範的排練）。
 - 我們用 ARBITER Gate 稽核了自己的兩個合約（見 `EVIDENCE.md`）。
 
 ### 4.2 改進：修正 InnoServe 決賽時沒做好的地方
@@ -98,7 +98,7 @@ ME 測試網連線資訊：EVM JSON-RPC `https://beta-hub-8545.explorer-testnet.
 
 ## 5. 體驗方式
 
-**線上（建議先看）**：驗證頁 〔GitHub Pages 網址〕，預設連 ME 測試網。輸入 `EVIDENCE.md` 裡的合約位址或紀錄編號即可。
+**線上（建議先看）**：驗證頁 https://sam029031.github.io/arbiter-gate/me/web/verify/ ，預設連 ME 測試網，資料直接從鏈上讀。例如修補後部署的 StakingVault：[紀錄 #4](https://sam029031.github.io/arbiter-gate/me/web/verify/?record=4)（來歷時間軸、部署檢查、證據自動下載重算）；也可以輸入 `EVIDENCE.md` 裡的任何合約位址、紀錄編號或交易雜湊。
 
 **本機**（WSL／Linux，需要 Foundry 與 Python 3.11+，不需要任何金鑰）：
 
@@ -115,6 +115,16 @@ cd arbiter && python3 -m arbiter.web --port 8765       # 網頁介面；開 http
 
 ## 6. ME 使用證據
 
+2026-11-23 在 ME Hub 測試網（chain 400）用一行指令完成整個示範，共 11 筆交易：
+
+- 合約：AuditRegistry `0xf619857eb017adc46d1dfeb8131979e1a97fb402`；AuditEscrow `0x8014653f1122833bc925b1b8741a1a202c7b955f`（由 AuditRegistry 依紀錄 #2 經閘門部署）。
+- 紀錄 #1、#2：用 ARBITER Gate 稽核我們自己的兩個合約（判定 1）。
+- 紀錄 #3：AI 證實 StakingVault 可被重入攻擊（判定 3）；對它呼叫 `deployAudited` 被合約拒絕（`NotDeployable(3)`）。
+- 紀錄 #4：修補後的 StakingVault（判定 1，上一版 #3），經閘門部署到 `0x86e3e9e68b402537f76806e735167237873a2f3c`。
+- 託管：委託 #1 鎖住 0.001 MEC，由紀錄 #3 結算付款（判定是 3 也照付）。
+
+`EVIDENCE.md` 最後的 4 行 `me.py verify` 指令都已對 ME 鏈實跑通過（證據雜湊、重新編譯、重跑攻擊）。
+
 見 [`EVIDENCE.md`](EVIDENCE.md)：每筆合約位址與交易都附 EVM 交易雜湊、Cosmos 交易雜湊、區塊、瀏覽器連結，以及對應的功能；瀏覽器打不開時可用 `cast receipt <交易> --rpc-url https://beta-hub-8545.explorer-testnet.me` 自己查。
 
 ## 7. 信任模型與限制（老實說）
@@ -123,6 +133,7 @@ cd arbiter && python3 -m arbiter.web --port 8765       # 網頁介面；開 http
 - **判定 1 是「沒有找到可證明的攻擊」，不等於安全。** 通過修補檢查只代表擋住了這一次證實的攻擊。
 - 任何人都能登記紀錄；讀者要自己決定信任哪些稽核者位址（`deployments/*.json` 的 `auditors` 名單只是部署者的背書）。`linkDeployment` 是稽核者自己的宣告，只能比對程式碼雜湊；`deployAudited` 才證明部署內容。
 - 驗證頁只替一件事背書：經由頁面內建的 ME RPC（或部署紀錄檔列出的節點）讀到、部署紀錄檔裡的那一個 AuditRegistry，而且鏈上程式碼雜湊和紀錄相同。連結裡的 `?rpc=`、`?registry=`、`?escrow=` 都可能是別人的節點或仿冒的合約，頁面會標成「非官方來源」、不顯示「✓」。
+- 已知缺口：`--replay` 只支援單檔、以受害者損失證實的攻擊；判定框架的帳戶身分仍是程式碼常數，目前用語法層檢查擋住 AI 讀取它們的管道；AuditEscrow 這類專案模式的稽核沒有 Slither 結果。
 - 範圍：EVM、Solidity、Foundry；AI 寫的攻擊程式在不能上網、唯讀的容器裡執行；只有「已證實可攻擊」才擋部署。ME 上的示範是測試網。
 
 ## 8. 檔案地圖
