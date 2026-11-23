@@ -55,7 +55,7 @@ ME 測試網連線資訊：EVM JSON-RPC `https://beta-hub-8545.explorer-testnet.
 
 ## 4. 11 月新增與改進（評審請看這裡）
 
-原有基礎是 InnoServe 2026 決賽版（`me-hackathon-base` ＝ `66a8f21`）。這次新增的部分全部在分支 `me-hackathon` 上，`git diff me-hackathon-base..me-hackathon` 就是完整範圍（不含內附的 forge-std，約 15,000 行新增）。
+原有基礎是 InnoServe 2026 決賽版，也就是公開 repo 的 `main` 分支（`eb3af18`）。這次新增與改進全部在分支 `me-hackathon` 上，完整範圍是 `git diff main..me-hackathon`，也可以直接看比較頁 [main...me-hackathon](https://github.com/sam029031/arbiter-gate/compare/main...me-hackathon)（不含內附的 forge-std，約 26,700 行新增）。
 
 ### 4.1 新增：ME Network 鏈上層（`me/`）
 
