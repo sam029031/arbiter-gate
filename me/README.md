@@ -63,8 +63,9 @@ ME 測試網連線資訊：EVM JSON-RPC `https://beta-hub-8545.explorer-testnet.
 - `arbiter_me/`：從 gate.json 產生紀錄與可重現的證據資料夾、登記、經由閘門部署、驗證（`--evidence`、`--rebuild`、`--replay`）、託管、0x ↔ me1 位址換算、ME 區塊瀏覽器的 Cosmos 雜湊換算；只用 Python 標準函式庫＋Foundry。
 - `web/verify/`：靜態驗證頁（桌機與手機），讀 ME 測試網或本機 anvil。
 - 網頁結果頁新增「鏈上紀錄」卡片（判定 → 鏈上拒絕部署 → 修補 → 部署的時間軸）；本機網頁可直接開 `/verify`。
-- `scripts/me_live_demo.sh`：一行指令在 ME 測試網完成整個示範，並寫出 `EVIDENCE.md`；`scripts/me_registry_probe.py`：在本機鏈上把同樣流程跑一遍的端到端檢查（79 項，含實鏈示範的排練）。
+- `scripts/me_live_demo.sh`：一行指令在 ME 測試網完成整個示範，並寫出 `EVIDENCE.md`；`scripts/me_registry_probe.py`：在本機鏈上把同樣流程跑一遍的端到端檢查（89 項，含實鏈示範與兩個錢包示範的排練）。
 - 我們用 ARBITER Gate 稽核了自己的兩個合約（見 `EVIDENCE.md`）。
+- `me.py two-party`：兩個錢包的託管示範，第二個錢包當委託人，也由它部署合約：委託 → 稽核者用紀錄結算 → 委託人經閘門部署 → 沒人結算的委託逾期退款。`me.py deploy --record N` 讓任何帳戶部署已登錄的紀錄。
 
 ### 4.2 改進：修正 InnoServe 決賽時沒做好的地方
 
@@ -113,6 +114,8 @@ cd arbiter && python3 -m arbiter.web --port 8765       # 網頁介面；開 http
 
 **自己上鏈**（需要 ME 測試網 MEC，水龍頭每天 2 MEC）：`bash me/scripts/new_wallet.sh` 建錢包 → 水龍頭領 MEC → `bash me/scripts/me_live_demo.sh`。整個示範只需不到 0.0011 MEC。
 
+**兩個錢包的託管示範**：再建一個錢包當委託人（`bash me/scripts/new_wallet.sh me-requester`），依序 `python3 me/me.py two-party request --account me-requester --source me/examples/PrimeYieldVault.sol` → 用 ARBITER Gate 稽核這份原始碼 → `two-party settle --account <稽核者> --gate <gate.json>` → `two-party deploy --account me-requester` → 開單 2 小時後 `two-party refund`；`two-party status` 會列出進度和下一步。
+
 ## 6. ME 使用證據
 
 2026-11-23 在 ME Hub 測試網（chain 400）用一行指令完成整個示範，共 11 筆交易：
@@ -123,7 +126,9 @@ cd arbiter && python3 -m arbiter.web --port 8765       # 網頁介面；開 http
 - 紀錄 #4：修補後的 StakingVault（判定 1，上一版 #3），經閘門部署到 `0x86e3e9e68b402537f76806e735167237873a2f3c`。
 - 託管：委託 #1 鎖住 0.001 MEC，由紀錄 #3 結算付款（判定是 3 也照付）。
 
-`EVIDENCE.md` 最後的 4 行 `me.py verify` 指令都已對 ME 鏈實跑通過（證據雜湊、重新編譯、重跑攻擊）。
+2026-11-25 另用第二個錢包（委託人兼開發者）完成 6 筆交易：委託 #2、#3 → 紀錄 #5（評測集裡修好的 PrimeYieldVault，判定 1）→ 紀錄 #5 結算委託 #2，費用付給稽核者 → 委託人用紀錄 #5 經閘門部署到 `0x61e01bef75c389ba16e5bf0342ad69de3b335867` → 委託 #3 過了期限沒人結算，退回委託人。兩個錢包都是我們的。
+
+`EVIDENCE.md` 最後的 5 行 `me.py verify` 指令都已對 ME 鏈實跑通過（證據雜湊、重新編譯、重跑攻擊）。
 
 見 [`EVIDENCE.md`](EVIDENCE.md)：每筆合約位址與交易都附 EVM 交易雜湊、Cosmos 交易雜湊、區塊、瀏覽器連結，以及對應的功能；瀏覽器打不開時可用 `cast receipt <交易> --rpc-url https://beta-hub-8545.explorer-testnet.me` 自己查。
 
@@ -134,6 +139,7 @@ cd arbiter && python3 -m arbiter.web --port 8765       # 網頁介面；開 http
 - 任何人都能登記紀錄；讀者要自己決定信任哪些稽核者位址（`deployments/*.json` 的 `auditors` 名單只是部署者的背書）。`linkDeployment` 是稽核者自己的宣告，只能比對程式碼雜湊；`deployAudited` 才證明部署內容。
 - 驗證頁只替一件事背書：經由頁面內建的 ME RPC（或部署紀錄檔列出的節點）讀到、部署紀錄檔裡的那一個 AuditRegistry，而且鏈上程式碼雜湊和紀錄相同。連結裡的 `?rpc=`、`?registry=`、`?escrow=` 都可能是別人的節點或仿冒的合約，頁面會標成「非官方來源」、不顯示「✓」。
 - 已知缺口：`--replay` 只支援單檔、以受害者損失證實的攻擊；判定框架的帳戶身分仍是程式碼常數，目前用語法層檢查擋住 AI 讀取它們的管道；AuditEscrow 這類專案模式的稽核沒有 Slither 結果。
+- 示範用的兩個錢包都由我們隊伍保管：11/23 的 11 筆由同一個錢包送出（委託人＝稽核者＝部署者）；11/25 的 6 筆委託人和稽核者是不同地址，展示合約在不同地址之間照規則運作，不代表已經有外部的委託人或稽核者。
 - 範圍：EVM、Solidity、Foundry；AI 寫的攻擊程式在不能上網、唯讀的容器裡執行；只有「已證實可攻擊」才擋部署。ME 上的示範是測試網。
 
 ## 8. 檔案地圖

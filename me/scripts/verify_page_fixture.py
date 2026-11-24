@@ -320,6 +320,10 @@ class Fixture:
         data = chain.calldata(contracts.SIG["escrow.settle"], str(request_id), str(record_id))
         return self.send(self.escrow, data)["transactionHash"]
 
+    def refund(self, request_id: int) -> str:
+        data = chain.calldata(contracts.SIG["escrow.refundExpired"], str(request_id))
+        return self.send(self.escrow, data)["transactionHash"]
+
 
 def build_chain(args: argparse.Namespace) -> dict:
     root = Path(args.root).resolve()
@@ -432,6 +436,13 @@ def build_chain(args: argparse.Namespace) -> dict:
     if reg.latest_record(a.address, sha256_hex(VAULT)) != r6:
         raise ChainError("latestRecord(A, DemoVault.sol) is not record 6")
 
+    # 7: B's escrow request 3 is never settled; after its deadline plus the 1-hour grace anyone may send
+    # the refund (the clock moves forward here; nothing later depends on the time)
+    req3, req3_tx = b.request(COUNTER, a.address)
+    client.rpc("evm_increaseTime", [2 * 3600 + 1])
+    client.rpc("evm_mine", [])
+    expire3_tx = b.refund(req3)
+
     spoof = build_spoofs(client, signer_a, signer_b, registry, gate_base)
     sim = root / "sim" / "me"
     (sim / "deployments").mkdir(parents=True, exist_ok=True)
@@ -457,8 +468,8 @@ def build_chain(args: argparse.Namespace) -> dict:
         "tx": {"register1": r1_tx, "register2": r2_tx, "deploy2a": deploy2a_tx, "deploy2b": deploy2b_tx,
                "register3": r3_tx, "register4": r4_tx, "link4": link4_tx, "register5": r5_tx,
                "register6": r6_tx, "request1": req1_tx, "settle1": settle1_tx, "request2": req2_tx,
-               "settle2": settle2_tx},
-        "requests": {"paid": req1, "refunded": req2},
+               "settle2": settle2_tx, "request3": req3_tx, "expire3": expire3_tx},
+        "requests": {"paid": req1, "refunded": req2, "expired": req3},
         "deployed": {"gatedA": deployed2a, "gatedB": deployed2b, "claimed": deployed4},
         "sourceHashes": {"DemoVault.sol": sha256_hex(VAULT), "DemoVault.patched.sol": sha256_hex(VAULT_PATCHED),
                          "DemoToken.sol": sha256_hex(TOKEN)},
@@ -547,6 +558,7 @@ SELECTOR_SIGS = {
 EVENT_SIGS = {
     "Registered": contracts.EVENT_REGISTERED, "Linked": contracts.EVENT_LINKED,
     "Requested": contracts.EVENT_REQUESTED, "Settled": contracts.EVENT_SETTLED,
+    "Expired": contracts.EVENT_EXPIRED,
 }
 
 
@@ -613,6 +625,9 @@ def write_vectors(path: Path) -> None:
          "data": chain.cast("abi-encode", "f(uint256,bool)", str(FEE_WEI), "true"),
          "expect": {"event": "Settled", "requestId": 1, "recordId": 3, "recipient": a1, "amount": str(FEE_WEI),
                     "refunded": True}},
+        {"topics": [topics["Expired"], word(2), "0x" + "00" * 12 + a2[2:].lower()],
+         "data": chain.cast("abi-encode", "f(uint256)", str(FEE_WEI)),
+         "expect": {"event": "Expired", "requestId": 2, "requester": a2, "amount": str(FEE_WEI)}},
     ]
     texts = ["abc", "ARBITER Gate 證據\n", ""]
     me_addresses = [{"hex": a, "me": bech32.bech32_encode(bech32.HRP, bytes.fromhex(a[2:]))} for a in (a1, a2)]

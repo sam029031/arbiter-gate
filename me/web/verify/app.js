@@ -692,6 +692,7 @@
       if (e.event === "Registered") return `登錄紀錄 #${e.id}（${L.verdictInfo(e.verdict).label}）`;
       if (e.event === "Linked") return `把地址 ${fmtAddr(e.deployed)} 連結到紀錄 #${e.id}（${L.linkInfo(e.linkKind).short}）`;
       if (e.event === "Requested") return `建立付費託管申請 #${e.requestId}（${L.formatUnits(e.fee)} ${S.net.symbol}）`;
+      if (e.event === "Expired") return `託管申請 #${e.requestId} 過了期限加 1 小時寬限都沒有結算：費用 ${L.formatUnits(e.amount)} ${S.net.symbol} 退回申請人`;
       return `以紀錄 #${e.recordId} 結算託管申請 #${e.requestId}：${e.refunded ? "退回申請人" : "付給稽核者"} ${L.formatUnits(e.amount)} ${S.net.symbol}`;
     });
     const summary = lines.length ? `這筆交易${ok ? "" : "（失敗）"}：${lines.join("；")}。` : "";
@@ -705,6 +706,10 @@
     else body.push(h("ul", null, lines.map((t) => h("li", null, t))));
     if (ids.length) body.push(await recordList(ids, run));
     else if (settled.length) body.push(await recordList([...new Set(settled.map((e) => e.recordId))], run));
+    else {
+      const reqIds = [...new Set(mine.filter((e) => e.event === "Requested" || e.event === "Expired").map((e) => e.requestId))];
+      if (reqIds.length) body.push(...await requestCards(reqIds));
+    }
     if (stale(run)) return;
     setResult(messageCard("交易內容", ...body));
   }
@@ -1017,6 +1022,41 @@
         h("span", { class: "meta" }, "還沒有修補版的紀錄")));
     }
     return ol;
+  }
+
+  /** An escrow transaction that settled no record (a new request, an expiry refund): the request
+   * itself, read back from the escrow, so its requester and named auditor are visible. */
+  async function requestCards(reqIds) {
+    if (!S.escrow) return [];
+    const out = [];
+    for (const id of reqIds) {
+      let q;
+      try {
+        q = L.decodeRequest(await call(S.escrow, "getRequest", [id]));
+      } catch (err) {
+        out.push(h("p", { class: "mute" }, `讀取託管申請 #${id} 失敗：${err.message || err}`));
+        continue;
+      }
+      const st = L.escrowStatusInfo(q.status);
+      const how = Number(q.recordId) ? `紀錄 #${q.recordId}`
+        : Number(q.status) === 3 ? "沒有紀錄：期限加 1 小時寬限內沒有結算，費用退回申請人" : "還沒有結算";
+      out.push(h("h3", null, `付費託管申請 #${id}`, S.escrowVerified ? null : [" ", unvTag()]));
+      if (!S.escrowVerified) {
+        out.push(h("p", { class: "notice" }, "這個 AuditEscrow 沒有經過程式碼驗證（見上方說明）：下面的申請、費用和結算都可能是捏造的。"));
+      }
+      out.push(kv([
+        ["結果", h("span", { class: `tag ${st.tone}` }, st.label)],
+        ["費用", `${L.formatUnits(q.fee)} ${S.net.symbol}`],
+        ["申請人", hexValue(q.requester, { kind: "address" })],
+        ["指定稽核者", hexValue(q.auditor, { kind: "address" })],
+        ["原始碼 sha256", hexValue(q.sourceHash)],
+        ["申請時間", L.formatTime(q.createdAt)],
+        ["期限", h("span", null, L.formatTime(q.deadline),
+          h("span", { class: "desc" }, `紀錄要在期限前登錄；結算最晚到 ${L.formatTime(q.deadline + L.SETTLE_GRACE)}，之後任何人都能把費用退回申請人。`))],
+        ["結算", how],
+      ]));
+    }
+    return out;
   }
 
   function renderEscrow(e, id) {

@@ -1,0 +1,83 @@
+{
+ "schema": "arbiter-gate/0.1",
+ "generated_at": "2026-11-25T00:30:44+0800",
+ "tool_commit": "fcca0e45c64505e3c800701b1e9a1236c3e9d04b",
+ "tool_commit_source": "ARBITER_TOOL_COMMIT",
+ "tool_commit_role": "audit",
+ "input": {
+  "mode": "file",
+  "file": "PrimeYieldVault.sol",
+  "run_id": "two-party-vault",
+  "workspace_mode": "repo",
+  "llm_requests_this_invocation": 9,
+  "usage": {
+   "requests": 9,
+   "prompt_tokens": 130029,
+   "completion_tokens": 10688,
+   "cost_usd": 0.0,
+   "retries": 0,
+   "http_errors": 0,
+   "parse_failures": 0,
+   "reasoning_recoveries": 9,
+   "system_fingerprints": [
+    "fp_ollama"
+   ],
+   "models_seen": [
+    "arbiter-gpt:latest"
+   ]
+  },
+  "results": "runs/gate/two-party-vault/two-party-vault.results.jsonl",
+  "llm_requests_audit": 9,
+  "llm_requests_repair": 0,
+  "sandbox": {
+   "status": "on",
+   "image": "arbiter-sandbox:me1",
+   "container_start_s": 0.88,
+   "memory_peak_bytes": 194666496,
+   "network": "none",
+   "env": "PATH only",
+   "dep_cache": {
+    "ok": true,
+    "files": 2405
+   }
+  }
+ },
+ "models": [
+  "arbiter-gpt:latest"
+ ],
+ "patches_file": null,
+ "repair": true,
+ "exit_code": 0,
+ "files": [
+  {
+   "id": "file::PrimeYieldVault",
+   "path": "runs/gate/two-party-vault/examples/PrimeYieldVault.sol",
+   "artifact": {
+    "uri": "PrimeYieldVault.sol",
+    "sha256": "95475090e227d72558b7ffe8afa77a7cd001818dba285c5732828509e66cfd0b"
+   },
+   "verdict": "no_provable_attack",
+   "label": "未發現可證明攻擊（不等於安全）",
+   "reason": "agent_concluded_no_attack",
+   "detail": "",
+   "turns": 9,
+   "elapsed_s": 300.16,
+   "static_analysis": {
+    "status": "ran",
+    "label": "",
+    "reason": "",
+    "tool": "slither 0.11.6",
+    "solc": "0.8.20",
+    "threshold": "impact ≥ Medium 且 confidence ≥ Medium",
+    "findings_total": 3,
+    "hints": []
+   },
+   "fixture_note": "",
+   "static_hints": [],
+   "hint_note": "",
+   "findings": []
+  }
+ ],
+ "elapsed_s": 304.19,
+ "note": "已證實可攻擊的判定附可重跑的攻擊證據；其他判定都不代表合約沒有漏洞。"
+}

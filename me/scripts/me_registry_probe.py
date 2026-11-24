@@ -68,6 +68,7 @@ from arbiter_me.session import open_session  # noqa: E402
 JOB = ARBITER_DIR / "runs" / "gate" / "jobs" / "20261106-200206-977ff0"
 RID = "be2e752405bb"  # the same result as saved by the web UI
 SOURCE = ARBITER_DIR / "examples" / "StakingVault.sol"
+TP_SOURCE = Path(__file__).resolve().parent.parent / "examples" / "PrimeYieldVault.sol"  # me.py two-party
 
 results: list[tuple[bool, str]] = []
 
@@ -894,7 +895,7 @@ def demo_checks(work: Path, rpc: str) -> None:
            "dev0": cast("wallet", "address", "--private-key", ANVIL_DEV_KEYS[0]).lower(),
            "v_reg": _verdict(SELF_GATES["registry"]), "v_esc": _verdict(SELF_GATES["escrow"])}
     # the low-balance scenario empties the dev account, so it runs last
-    for name, fn in (("inputs", _demo_inputs), ("stale dogfood", _demo_stale), ("fresh run", _demo_fresh),
+    for name, fn in (("inputs", _demo_inputs), ("stale dogfood", _demo_stale), ("fresh run", _demo_fresh), ("two wallets", _demo_two_party),
                      ("run without dogfood", _demo_legacy), ("unfinished escrow audit", _demo_unfinished),
                      ("low balance", _demo_low_balance)):
         try:
@@ -1035,6 +1036,104 @@ def _demo_fresh(ctx: dict) -> None:
           and s2.get("escrow", {}).get("record", {}).get("reused") and s2.get("escrow", {}).get("deploy", {}).get("reused")
           and dep2.get("escrow", {}).get("address") == esc and dep2["escrow"].get("tx") == dep["escrow"]["tx"],
           "demo: dogfood steps mined before an unsaved state are found on chain and not sent again", out[-500:])
+
+
+def _tp_gate(dst: Path, source: Path) -> Path:
+    """A verdict-1 gate.json for `source`, made from the recording (anvil rehearsal only)."""
+    g = json.loads((JOB / "gate.json").read_text(encoding="utf-8"))
+    f = dict(g["files"][0])
+    f.update(id=f"file::{source.stem}", path=source.name,
+             artifact={"uri": source.name, "sha256": sha256_hex(source.read_bytes())[2:]},
+             verdict="no_provable_attack", label="未發現可證明攻擊（不等於安全）", reason="no_finding",
+             findings=[], static_hints=[])
+    g["files"] = [f]
+    dst.mkdir(parents=True, exist_ok=True)
+    (dst / "gate.json").write_text(json.dumps(g, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    return dst / "gate.json"
+
+
+def _demo_two_party(ctx: dict) -> None:
+    """me.py two-party on the fresh run's deployment: a second account requests, the auditor settles,
+    the requester deploys through the gate, the request nobody settles is refunded after expiry."""
+    client, dev0 = ctx["client"], ctx["dev0"]
+    dev1 = cast("wallet", "address", "--private-key", ANVIL_DEV_KEYS[1]).lower()
+    s = ctx["d"] / "a"
+    dep_path, md, ev, st_path = s / "anvil.json", s / "EVIDENCE.md", s / "ev", s / "two-party.json"
+    dep = _load(dep_path)
+    reg, esc = Registry(client, dep["registry"]["address"]), Escrow(client, dep["escrow"]["address"])
+    net = ["--network", "anvil", "--rpc", ctx["rpc"], "--deployments", dep_path, "--state", st_path,
+           "--demo-state", s / "state.json", "--evidence-md", md, "--evidence-root", ev]
+    rows_before = len(_tx_rows(md))
+    gate = _tp_gate(s / "tp-job", TP_SOURCE)
+
+    def tp(*a):
+        return cli("two-party", *a, *net)
+
+    code, out = tp("request", "--source", TP_SOURCE, "--dev")
+    check(code != 0 and "同一個地址" in out, "two-party: the auditor's own account cannot be the requester", out[-300:])
+    code, out = tp("settle", "--gate", gate, "--dev")
+    check(code != 0 and "還沒有委託" in out, "two-party: settle before any request is refused", out[-300:])
+
+    n0, bal0 = esc.request_count(), client.balance(esc.address)
+    code, out = tp("request", "--source", TP_SOURCE, "--note", "probe note", "--dev", "--dev-key", "1")
+    st = _load(st_path)
+    rq = st.get("requests") or {}
+    span = lambda k: (lambda q: q["deadline"] - q["createdAt"])(esc.get(rq[k]["id"])) if k in rq else None  # noqa: E731
+    check(code == 0 and esc.request_count() == n0 + 2 and st.get("requester") == dev1 and st.get("auditor") == dev0
+          and client.balance(esc.address) == bal0 + 2 * 10**15 and span("paid") == 7 * 24 * 3600 and span("expire") == 3600,
+          "two-party: the second account locks two fees naming the auditor (7 days and 1 hour)", out[-400:])
+    code, out = tp("request", "--source", TP_SOURCE, "--dev", "--dev-key", "1")
+    check(code == 0 and esc.request_count() == n0 + 2, "two-party: rerunning request sends nothing", out[-300:])
+
+    code, out = tp("settle", "--gate", gate, "--dev", "--dev-key", "1")
+    check(code != 0 and "稽核者" in out, "two-party: only the named auditor's account may settle", out[-300:])
+    code, out = tp("deploy", "--dev", "--dev-key", "1")
+    check(code != 0 and "還沒有稽核紀錄" in out, "two-party: deploy before the record is refused", out[-300:])
+
+    code, out = tp("settle", "--gate", gate, "--dev")
+    st = _load(st_path)
+    rec, stl = st.get("record") or {}, st.get("settle") or {}
+    rid = rec.get("id")
+    check(code == 0 and rec.get("verdict") == 1 and rid and reg.record(rid)["auditor"].lower() == dev0
+          and stl.get("status") == "paid" and str(stl.get("recipient")).lower() == dev0
+          and client.balance(esc.address) == bal0 + 10**15,
+          "two-party: the auditor registers its record and the escrow pays it", out[-400:])
+    code, out = tp("settle", "--gate", gate, "--dev")
+    check(code == 0 and "跳過" in out and reg.record_count() == rid, "two-party: rerunning settle sends nothing", out[-300:])
+
+    code, out = tp("deploy", "--dev")
+    check(code != 0 and "委託人" in out, "two-party: the deploy step belongs to the requester", out[-300:])
+    code, out = tp("deploy", "--dev", "--dev-key", "1")
+    st = _load(st_path)
+    d = st.get("deploy") or {}
+    want = reg.predict(rid, dev1, deploy_mod.salt_for(rid)).lower() if rid else None
+    check(code == 0 and d.get("status") == "deployed" and d.get("address") == want and reg.deployment_of(want) == rid
+          and want != reg.predict(rid, dev0, deploy_mod.salt_for(rid)).lower() and d.get("deployer") == dev1,
+          "two-party: the requester deploys the audited bytecode at the address bound to it (LINK_GATED)", out[-400:])
+
+    code, out = tp("refund", "--dev", "--dev-key", "1")
+    check(code != 0 and "還不能退款" in out, "two-party: refund waits for the deadline plus the grace", out[-300:])
+    client.increase_time(3600 + 3600 + 1)
+    code, out = tp("refund", "--dev", "--dev-key", "1")
+    st = _load(st_path)
+    rf = st.get("refund") or {}
+    check(code == 0 and rf.get("status") == "refunded" and str(rf.get("recipient")).lower() == dev1
+          and client.balance(esc.address) == bal0 and esc.get(rq["expire"]["id"])["status"] == 3,
+          "two-party: after the deadline plus the grace the requester gets its fee back", out[-400:])
+
+    rows, text = _tx_rows(md), md.read_text(encoding="utf-8")
+    check("## 兩個錢包的託管示範" in text and "probe note" in text and len(rows) == rows_before + 6
+          and rows[rows_before].startswith(f"| {rows_before + 1} |")
+          and text.count("| 委託人 |") == 4 and text.count("| 稽核者 |") == 2 and "（委託人部署）" in text,
+          "two-party: EVIDENCE.md lists the six transactions after the first table, with who sent each", text[-700:])
+    code, out = tp("status")
+    check(code == 0 and "全部完成" in out, "two-party: status says every step is done", out[-300:])
+    code, out = cli("verify", d.get("address"), "--network", "anvil", "--rpc", ctx["rpc"], "--deployments", dep_path,
+                    "--evidence", ev / "two-party", "--rebuild")
+    check(code == 0, "two-party: me.py verify rebuilds the requester's deployment from the bundle", out[-500:])
+    code, out = cli("deploy", "--record", rid, "--source", TP_SOURCE, "--network", "anvil", "--rpc", ctx["rpc"],
+                    "--deployments", dep_path, "--dev", "--dev-key", "1")
+    check(code == 0 and "先前的執行已經部署" in out, "deploy --record: a deployed record is not deployed twice", out[-300:])
 
 
 def _demo_legacy(ctx: dict) -> None:

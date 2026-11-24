@@ -86,6 +86,12 @@ def _state_path(net: str) -> Path:
     return ME_DIR / "deployments" / f"{net}.demo.json"
 
 
+def _two_party(net: str) -> dict | None:
+    """The two-wallet demo's state (me.py two-party), when it has been run on this network."""
+    path = ME_DIR / "deployments" / f"{net}.two-party.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
 def _save(path: Path, state: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
@@ -336,7 +342,8 @@ def _run(client: Client, signer, args, inp: Inputs, dep_path: Path, state_path: 
         return 0
 
     _step("5. 寫 EVIDENCE.md")
-    args.evidence_md.write_text(evidence_md(sess, state, args.evidence_root), encoding="utf-8")
+    args.evidence_md.write_text(evidence_md(sess, state, args.evidence_root, two_party=_two_party(net.name)),
+                                encoding="utf-8")
     print(f"  {args.evidence_md.name} 已更新；重驗：python3 me/me.py verify {state['patched']['deploy'].get('address')}"
           f" --network {net.name} --evidence {_rel(args.evidence_root / 'staking-vault' / 'patched')} --rebuild --replay")
     return 0 if state["patched"]["deploy"].get("status") == "deployed" else 1
@@ -594,7 +601,7 @@ def _commit_cell(info: dict, onchain: str) -> str:
     return f"gate.json 沒有記錄（鏈上 toolCommit 是登錄時的 git HEAD `{onchain[2:14]}…`）"
 
 
-def evidence_md(sess: Session, state: dict, evidence_root: Path) -> str:
+def evidence_md(sess: Session, state: dict, evidence_root: Path, two_party: dict | None = None) -> str:
     net, d = sess.net, sess.deployment
     reg_addr, esc = d["registry"]["address"], d["escrow"]
 
@@ -669,6 +676,10 @@ def evidence_md(sess: Session, state: dict, evidence_root: Path) -> str:
     add(p["deploy"].get("tx"), p["deploy"].get("cosmosTx"),
         "deployAudited：登錄合約用 CREATE2 把修補後、稽核過的 bytecode 部署到事先預測的地址（LINK_GATED）")
     rows.sort(key=lambda r: r[0])  # chronological (an older run's rows come first)
+    tp = None
+    if two_party:
+        from .two_party import evidence_parts  # late: two_party imports this module
+        tp = evidence_parts(sess, two_party, evidence_root, tx, ad, start=len(rows) + 1)
 
     reg_role = "稽核紀錄只能新增、不能修改；判定 3（已證實可攻擊）和 0（稽核未完成）不能經由它部署"
     if lk.get("status") == "claimed":
@@ -712,6 +723,8 @@ def evidence_md(sess: Session, state: dict, evidence_root: Path) -> str:
                          f"{info.get('model') or '未記錄'} | `{info['sha256']}`{'' if same else '（和鏈上 gateJsonHash 不同！）'} | "
                          f"{folders} |")
 
+    if tp:
+        gate_rows += tp["gate_rows"]
     patched_addr = p["deploy"].get("address")
     verify = [f"python3 me/me.py verify {patched_addr} --network {net.name} --evidence {_rel(sv / 'patched')} --rebuild --replay",
               f"python3 me/me.py verify {b['record']['id']} --network {net.name} --evidence {_rel(sv / 'original')} --replay"]
@@ -721,6 +734,8 @@ def evidence_md(sess: Session, state: dict, evidence_root: Path) -> str:
     if se.get("record"):
         target = esc["address"] if gated or elk.get("status") == "claimed" else se_id
         verify.append(f"python3 me/me.py verify {target} --network {net.name} --evidence {_rel(own / 'escrow')} --rebuild")
+    if tp:
+        verify += tp["verify"]
 
     lines = [
         "# ARBITER Gate × ME 測試網：鏈上證據",
@@ -737,6 +752,7 @@ def evidence_md(sess: Session, state: dict, evidence_root: Path) -> str:
         f"| AuditRegistry | {ad(reg_addr)} | {reg_role} |",
         f"| AuditEscrow | {ad(esc['address'])} | {esc_role} |",
         f"| StakingVault（修補後） | {ad(patched_addr)} | 由登錄合約部署，鏈上可查它就是紀錄 #{p['record']['id']} 稽核過的 bytecode |",
+        *(tp["contracts"] if tp else []),
         "",
         "## 稽核結果（gate.json）",
         "",
@@ -755,6 +771,7 @@ def evidence_md(sess: Session, state: dict, evidence_root: Path) -> str:
         "|---|---|---|---|",
         *[f"| {i} | {cells} | {what} |" for i, (_, cells, what) in enumerate(rows, 1)],
         "",
+        *(tp["section"] if tp else []),
         "## 重驗（任何人都可以跑）",
         "",
         "```bash",

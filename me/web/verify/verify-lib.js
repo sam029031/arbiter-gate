@@ -153,12 +153,14 @@
     Linked: "0xc60dbe230823659866ba35fa4db934c12e713db1f867c73ee65c9fdbf094044e",
     Requested: "0x4cfd69661e9438fcbeacf399fdfa395030b9bc3ae91b0d962e73feee901f702a",
     Settled: "0x28a6c19885d00afe0e46b0e4d166455e5382102b7e05a6798ed31971f03496f1",
+    Expired: "0x351d62d6586f4b47895b0ce3a8f2730711b3bdbfe9b6f82f36e97a80b8cdefa0",
   };
   const EVENT_SIGS = {
     Registered: "Registered(uint256,bytes32,address,uint8,uint256)",
     Linked: "Linked(uint256,address,bytes32,uint8)",
     Requested: "Requested(uint256,address,address,bytes32,uint256,uint64)",
     Settled: "Settled(uint256,uint256,address,uint256,bool)",
+    Expired: "Expired(uint256,address,uint256)",
   };
   const MAX_U256 = (1n << 256n) - 1n;
   const ENC = {
@@ -295,6 +297,8 @@
         case TOPICS.Settled:
           return { event: "Settled", requestId: topicNum(1), recordId: topicNum(2), recipient: topicAddr(3),
                    amount: uintAt(d, 0), refunded: uintAt(d, 32) !== 0n };
+        case TOPICS.Expired:
+          return { event: "Expired", requestId: topicNum(1), requester: topicAddr(2), amount: uintAt(d, 0) };
         default:
           return null;
       }

@@ -1,0 +1,39 @@
+{
+ "fileEntry": "file::PrimeYieldVault",
+ "files": [
+  {
+   "name": "compiler.json",
+   "role": "compiler",
+   "sha256": "0xaaac2eefedbc6f84c58b470d2a132e55408f709ee4af94430491ca99473ba51b"
+  },
+  {
+   "name": "gate.json",
+   "role": "gate_json",
+   "sha256": "0x5008075cea37a232041f5d8b69c689c21bd1f94f276019e4203b7ca954c83352"
+  },
+  {
+   "name": "src/PrimeYieldVault.sol",
+   "role": "source",
+   "sha256": "0x95475090e227d72558b7ffe8afa77a7cd001818dba285c5732828509e66cfd0b"
+  }
+ ],
+ "gateVerdict": "no_provable_attack",
+ "patched": false,
+ "recordInput": {
+  "evidenceTier": 0,
+  "evidenceURI": "https://raw.githubusercontent.com/sam029031/arbiter-gate/me-hackathon/me/evidence/two-party",
+  "exploitHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "gateJsonHash": "0x5008075cea37a232041f5d8b69c689c21bd1f94f276019e4203b7ca954c83352",
+  "initcodeHash": "0x91bc60fbe5ce6d33cae5caf6d9c7bb5f81a0db797892eb41d230f8a5168560a7",
+  "model": "arbiter-gpt",
+  "parentId": 0,
+  "patchHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "predicateClass": 0,
+  "sourceHash": "0x95475090e227d72558b7ffe8afa77a7cd001818dba285c5732828509e66cfd0b",
+  "toolCommit": "0xfcca0e45c64505e3c800701b1e9a1236c3e9d04b",
+  "verdict": 1
+ },
+ "schema": "arbiter-me-evidence/0.1",
+ "toolCommitDirty": false,
+ "toolCommitSource": "gate.json（ARBITER_TOOL_COMMIT）"
+}

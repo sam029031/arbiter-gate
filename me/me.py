@@ -11,6 +11,7 @@
     python3 me/me.py verify   0x…|ID|tx [--evidence DIR --rebuild --replay]
     python3 me/me.py escrow   request|settle|refund|status …
     python3 me/me.py demo --account NAME [--job DIR --rid RID]   早上的實鏈示範（me/scripts/me_live_demo.sh）
+    python3 me/me.py two-party request|settle|deploy|refund|status …   兩個錢包的託管示範（委託人不是稽核者）
 
 Every subcommand takes --network (me-testnet default, or anvil) and --rpc.
 """
@@ -124,6 +125,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("demo", help="ME 測試網實鏈示範（可重跑，已完成的步驟會跳過）")
     from arbiter_me import demo
     demo.add_args(p)
+    p = sub.add_parser("two-party", help="兩個錢包的託管示範：委託人付費、稽核者結算、委託人部署、逾期退款")
+    from arbiter_me import two_party
+    two_party.add_args(p)
 
     args = ap.parse_args(argv)
     try:
@@ -139,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
             return verify.run(args)
         if args.cmd == "escrow":
             return escrow.run(args)
+        if args.cmd == "two-party":
+            return two_party.run(args)
         return demo.run(args)
     except (ChainError, ValueError, FileNotFoundError) as exc:
         print(f"錯誤：{exc}")

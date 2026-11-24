@@ -15,6 +15,10 @@ record is registered and again after each later step, with the steps still to do
 "pending"; a step that fails is recorded there instead of aborting. Running the same command
 again picks up the same record (identical on-chain fields, same auditor) and does only the
 pending steps, so an interrupted run never registers a duplicate.
+
+--record N deploys a record that is already registered, from this account: deployAudited is open
+to every caller and binds the address to the record, the caller and the salt, so a developer can
+deploy what an auditor audited.
 """
 from __future__ import annotations
 
@@ -24,11 +28,11 @@ import json
 from pathlib import Path
 
 from . import abi
-from .build import Build
+from .build import Build, compile_source
 from .chain import ChainError, Client, RpcError, format_mec
 from .contracts import (EVENT_LINKED, LINK_LABELS, RECORD_FIELDS, REQUEST_STATUS, REQUEST_STATUS_ZH, VERDICT_LABELS,
                         Registry, revert_text, simulate)
-from .record import DIRTY_MARK, WEB_DIR, RecordPlan, load_gate, plan_record
+from .record import DIRTY_MARK, WEB_DIR, RecordPlan, load_gate, normalize_source, plan_record, sha256_hex
 from .session import Session, add_network_args, open_session
 
 PUSH0_HINT = ("節點拒絕 PUSH0 指令（invalid opcode: PUSH0）：ME 測試網不支援 shanghai 以後的 EVM。"
@@ -110,6 +114,44 @@ def show_refusal(sess: Session, rid: int, build: Build | None, salt: str | None 
         out["txStatus"] = str(receipt.get("status"))
         out["cosmosTx"] = sess.client.cosmos_tx_hash(receipt["transactionHash"])
     return out
+
+
+def deploy_existing(sess: Session, rid: int, source: Path, contract: str | None = None, ctor_args: str = "0x",
+                    record_refusal: bool = False, dry_run: bool = False) -> dict:
+    """Deploy a record that is already registered, from this session's account. deployAudited is
+    open to every caller, not only the record's auditor (the address is bound to the record, the
+    caller and the salt), so a developer can deploy what an auditor audited. The initcode is
+    rebuilt from the audited source with the fixed recipe and must equal the record's initcodeHash."""
+    reg = sess.registry
+    if not 1 <= rid <= reg.record_count():
+        raise ChainError(f"紀錄 #{rid} 不存在")
+    rec = reg.record(rid)
+    raw = Path(source).read_bytes()
+    want = str(rec["sourceHash"]).lower()
+    text = next((b for b in (raw, normalize_source(raw)) if sha256_hex(b) == want), None)
+    if text is None:
+        raise ChainError(f"{Path(source).name} 的 sha256 和紀錄 #{rid} 的 sourceHash（{want}）不同：要用稽核時的同一份檔案")
+    build = compile_source(text.decode("utf-8"), Path(source).name, contract, evm_version=sess.net.evm_version,
+                           ctor_args=ctor_args)
+    if build.initcode_hash.lower() != str(rec["initcodeHash"]).lower():
+        raise ChainError(f"重新編譯的建立程式碼雜湊 {build.initcode_hash} 和紀錄 #{rid} 的 initcodeHash 不同："
+                         "--contract 與 --ctor-args 要和登錄時相同")
+    if rec["verdict"] not in (1, 2):
+        return show_refusal(sess, rid, build, record=record_refusal and not dry_run)
+    signer = sess.require_signer()
+    salt = salt_for(rid)
+    predicted = reg.predict(rid, signer.address, salt).lower()
+    if reg.deployment_of(predicted) == rid:  # an earlier run already deployed it
+        tx = _linked_tx(sess, rid, predicted, rec["timestamp"])
+        return {"status": "deployed", "reason": "", "address": predicted, "tx": tx, "linkKind": 2,
+                "runtimeCodeHash": sess.client.code_hash(predicted), "predicted": predicted, "salt": salt,
+                "cosmosTx": sess.client.cosmos_tx_hash(tx) if tx else None, "resumed": True}
+    if dry_run:
+        ok, _, err = simulate(sess.client, reg.address, Registry.deploy_data(rid, build.deploy_code, salt),
+                              sender=signer.address)
+        return {"status": "dry_run" if ok else "failed", "reason": "" if ok else revert_text(err),
+                "predicted": predicted, "salt": salt, "address": None, "tx": None}
+    return deploy_through_registry(sess, rid, build, salt)
 
 
 # ------------------------------------------------------------------ escrow pre-check
@@ -329,6 +371,8 @@ def add_args(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--record-refusal", action="store_true",
                     help="判定 0/3 時把被拒絕的部署也送上鏈（交易會失敗，在瀏覽器上看得到拒絕）")
     ap.add_argument("--escrow-request", type=int, help="登錄後用這筆紀錄結算這個委託編號")
+    ap.add_argument("--record", type=int, help="部署已登錄的紀錄（判定 1/2）：用這個帳戶經由登錄合約部署，"
+                    "不登錄新紀錄；--source、--contract、--ctor-args 要和登錄時相同")
     ap.add_argument("--web-dir", type=Path, help=argparse.SUPPRESS)
     ap.add_argument("--dry-run", action="store_true", help="只建紀錄與證據、做 preflight，不送交易")
     ap.add_argument("--json", action="store_true", help="輸出 JSON")
@@ -344,6 +388,10 @@ def run(args: argparse.Namespace, register_only: bool = False) -> int:
 
 
 def _run(sess: Session, args: argparse.Namespace, register_only: bool) -> int:
+    if getattr(args, "record", None):
+        if register_only:
+            raise ChainError("--record 是部署已登錄的紀錄，只能用在 deploy")
+        return _run_existing(sess, args)
     gate = load_gate(args.gate, args.rid, args.web_dir)
     base = (args.gate.parent if args.gate else (args.web_dir or WEB_DIR))
     default_out = base / (("me-evidence-patched" if args.patch else "me-evidence") if args.gate
@@ -416,6 +464,31 @@ def _run(sess: Session, args: argparse.Namespace, register_only: bool) -> int:
         print(_summary(sess, plan, reg, deploy, escrow_req, paths, pending))
     done = deploy["status"] in ("deployed", "blocked", "not_requested")
     return 0 if done and not pending else 1
+
+
+def _run_existing(sess: Session, args: argparse.Namespace) -> int:
+    """me.py deploy --record N: this account deploys record N (anyone may, not only its auditor)."""
+    rid = args.record
+    out = deploy_existing(sess, rid, args.source, args.contract, args.ctor_args,
+                          record_refusal=args.record_refusal, dry_run=args.dry_run)
+    if args.json:
+        print(json.dumps(out, ensure_ascii=False, indent=1))
+        return 0 if out["status"] in ("deployed", "dry_run") else 1
+    who = sess.signer.address if sess.signer else "?"
+    if out["status"] == "dry_run":
+        print(f"紀錄 #{rid}：模擬成功，{who} 送出 deployAudited 會部署到 {out['predicted']}（沒有送交易）")
+        return 0
+    if out["status"] == "deployed":
+        url = sess.net.tx_url(out["tx"], out.get("cosmosTx")) if out.get("tx") else None
+        print(f"紀錄 #{rid}：{who} 經由登錄合約部署到 {out['address']}（LINK_GATED）"
+              + ("，先前的執行已經部署" if out.get("resumed") else "")
+              + (f"\n  交易 {out['tx']}" if out.get("tx") else "") + (f"\n  {url}" if url else ""))
+        return 0
+    if out["status"] == "blocked":
+        print(f"紀錄 #{rid} 不能部署：{out['reason']}" + (f"\n  被拒絕的交易 {out['tx']}" if out.get("tx") else ""))
+        return 1
+    print(f"紀錄 #{rid} 部署失敗：{out['reason']}")
+    return 1
 
 
 def _commit_line(plan: RecordPlan) -> str:

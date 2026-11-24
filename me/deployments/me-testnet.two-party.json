@@ -1,0 +1,103 @@
+{
+ "network": "me-testnet",
+ "auditor": "0xbe51c98b205109e24bd4f3d26c7b0cb66c370700",
+ "requester": "0xcf95101424f255e38428f534e8b5e52c81d62e40",
+ "source": "me/examples/PrimeYieldVault.sol",
+ "file": "PrimeYieldVault.sol",
+ "sourceHash": "0x95475090e227d72558b7ffe8afa77a7cd001818dba285c5732828509e66cfd0b",
+ "contract": "PrimeYieldVault",
+ "ctorArgs": "0x",
+ "requests": {
+  "paid": {
+   "id": 2,
+   "fee_wei": "1000000000000000",
+   "status": "open",
+   "deadline": 1796142126,
+   "tx": "0x71aa94d38165103981cb3fb921014254a86fbc74cb8f260a03e42921cb506ce3",
+   "cosmosTx": "D1CC816BCF3C333B6805C632BBAB592108713B52F7704AA62DAC474DA4DB7F4A",
+   "ttl": 604800
+  },
+  "expire": {
+   "id": 3,
+   "fee_wei": "1000000000000000",
+   "status": "open",
+   "deadline": 1795540931,
+   "tx": "0xdafb41513de62685bb67d9c66eab1aa659791e8bda4aece9b877b60d9ee64af1",
+   "cosmosTx": "E3AE0B59EEB8DD71799091F0B0F92C4A7D87B5F58FFEEDB3BB5F9FCD5D7008DD",
+   "ttl": 3600
+  }
+ },
+ "note": "委託稽核的合約是評測集 `arbiter/evalsets/v3_authored.json` 裡修好的 PrimeYieldVault（`S_first_depositor_share_inflation`，原樣放在 `me/examples/PrimeYieldVault.sol`），代表開發者要部署到 ME 的合約。稽核只跑一次，結果照實登錄。",
+ "record": {
+  "id": 5,
+  "tx": "0x04aa173b48f8e6ce1d53b0ced52ab1234c97a9828754ade40b602443efd40a35",
+  "block": 5494999,
+  "auditor": "0xbe51c98b205109e24bd4f3d26c7b0cb66c370700",
+  "cosmosTx": "2A7B6DB44E83125DFDA8AF1D8BB6AC34C3CABE17FE90DD2B94398DB48CFFC728",
+  "verdict": 1,
+  "input": {
+   "sourceHash": "0x95475090e227d72558b7ffe8afa77a7cd001818dba285c5732828509e66cfd0b",
+   "initcodeHash": "0x91bc60fbe5ce6d33cae5caf6d9c7bb5f81a0db797892eb41d230f8a5168560a7",
+   "verdict": 1,
+   "predicateClass": 0,
+   "evidenceTier": 0,
+   "gateJsonHash": "0x5008075cea37a232041f5d8b69c689c21bd1f94f276019e4203b7ca954c83352",
+   "exploitHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "patchHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+   "parentId": 0,
+   "toolCommit": "0xfcca0e45c64505e3c800701b1e9a1236c3e9d04b",
+   "model": "arbiter-gpt",
+   "evidenceURI": "https://raw.githubusercontent.com/sam029031/arbiter-gate/me-hackathon/me/evidence/two-party"
+  },
+  "gate": {
+   "file": "two-party-vault.gate.json",
+   "sha256": "0x5008075cea37a232041f5d8b69c689c21bd1f94f276019e4203b7ca954c83352",
+   "generatedAt": "2026-11-25T00:30:44+0800",
+   "toolCommit": "fcca0e45c64505e3c800701b1e9a1236c3e9d04b",
+   "toolCommitSource": "ARBITER_TOOL_COMMIT",
+   "model": "arbiter-gpt",
+   "mode": "file",
+   "entry": "file::PrimeYieldVault",
+   "gateVerdict": "no_provable_attack",
+   "verdict": 1,
+   "auditedSha256": "0x95475090e227d72558b7ffe8afa77a7cd001818dba285c5732828509e66cfd0b"
+  },
+  "bundle": "me/evidence/two-party"
+ },
+ "settle": {
+  "id": 2,
+  "fee_wei": "1000000000000000",
+  "status": "paid",
+  "settleTx": "0x003a9f7c5a51cea915ed34f2255e4d31d695dc18493b9d8ef0d2ee1ed835c437",
+  "recordId": 5,
+  "recipient": "0xbe51c98b205109e24bd4f3d26c7b0cb66c370700",
+  "cosmosTx": "8043D332488DC709DE678F61DAEAC8B040E64994C966992C1ABA24A7D350119A"
+ },
+ "deploy": {
+  "status": "deployed",
+  "reason": "",
+  "address": "0x61e01bef75c389ba16e5bf0342ad69de3b335867",
+  "tx": "0x6839901ae696e67e42f65b4c11e8392f102f9547a9398d2c969cd5f6c91629f2",
+  "linkKind": 2,
+  "runtimeCodeHash": "0xf83b19b6aa93cdb6884855ae2bf03aa4d5bf85f338aa134b10189270787c7df3",
+  "predicted": "0x61e01bef75c389ba16e5bf0342ad69de3b335867",
+  "salt": "0x0000000000000000000000000000000000000000000000000000000000000005",
+  "checks": {
+   "predicted_address": true,
+   "codehash_matches_event": true,
+   "link_gated": true,
+   "codehash_matches_build": true
+  },
+  "cosmosTx": "9561CBA3D0473DDC1F49060B3A3A5E796AD1F1501DBC32A75E522B9413E8F410",
+  "deployer": "0xcf95101424f255e38428f534e8b5e52c81d62e40"
+ },
+ "refund": {
+  "id": 3,
+  "fee_wei": "1000000000000000",
+  "status": "refunded",
+  "settleTx": "0xae8863b5de7ea674a1253bdaf3d6d71185e81bebf4b85647be3d2b26ee4beb57",
+  "recipient": "0xcf95101424f255e38428f534e8b5e52c81d62e40",
+  "cosmosTx": "A91C8E7ACD6ECE0E031E7BDAE519C0E42878F7D8E75D40A384F1993BFB549CD9",
+  "by": "0xcf95101424f255e38428f534e8b5e52c81d62e40"
+ }
+}
