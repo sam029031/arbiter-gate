@@ -402,7 +402,7 @@ test("provenanceSteps: proven -> patch -> re-audit -> deploy, plus children", ()
   ]);
   assert.deepEqual(steps.map((s) => s.type), ["record", "patch", "record", "deploy", "patch", "record"]);
   assert.deepEqual(steps.filter((s) => s.type === "record").map((s) => [s.id, s.stage, s.current, s.child]),
-    [[1, "稽核", false, false], [2, "重新稽核", true, false], [5, "重新稽核", false, true]]);
+    [[1, "稽核", false, false], [2, "修補版", true, false], [5, "修補版", false, true]]);
   assert.equal(steps[3].linkKind, 2);
   assert.deepEqual(L.provenanceSteps([{ id: 4, record: rec(2, 0), current: true }]).map((s) => s.type), ["record"]);
   // the current record lists every gated deployment; a claim is its own step

@@ -22,8 +22,8 @@
          desc: "稽核沒有跑完（例如無法編譯、連線中斷），不能當成通過，也不能部署。" },
   };
   const PREDICATES = {
-    0: { label: "無", desc: "沒有已證實的攻擊，所以沒有判定條件。" },
-    1: { label: "寬鬆", desc: "以攻擊者獲利或合約狀態被改變來判定（eth_profit、token_profit、state_change），看不出一定有人受損。" },
+    0: { label: "無", desc: "沒有已證實的攻擊，所以沒有證實條件。" },
+    1: { label: "寬鬆", desc: "只看攻擊者有沒有獲利（持有的 ETH 或代幣變多），或一般使用者改不動的狀態（例如擁有者）被沒有權限的帳戶改掉（eth_profit、token_profit、state_change），看不出一定有人受損；一樣記為已證實可攻擊、擋部署。" },
     2: { label: "嚴格", desc: "以有人真的受損來判定：有攻擊時受害者領回的比沒攻擊時少，而且差額在攻擊者手上（victim_loss），或合約被弄到無法正常使用（liveness_broken）。" },
   };
   const TIERS = {
@@ -73,7 +73,7 @@
     return table[v] || { label: `未知的${kind}代碼 ${v}`, tone: "mute", desc: "這個頁面不認得這個代碼。" };
   }
   const verdictInfo = (v) => lookup(VERDICTS, v, "判定");
-  const predicateInfo = (v) => lookup(PREDICATES, v, "謂詞等級");
+  const predicateInfo = (v) => lookup(PREDICATES, v, "證實條件");
   const tierInfo = (v) => lookup(TIERS, v, "證據等級");
   const linkInfo = (v) => lookup(LINKS, v, "連結方式");
   const escrowStatusInfo = (v) => lookup(ESCROW_STATUS, v, "託管狀態");
@@ -733,7 +733,7 @@
       if (prev && inp.parentId === prev.id) {
         steps.push({ type: "patch", from: inp.parentId, to: n.id, patchHash: inp.patchHash });
       }
-      const stage = inp.parentId ? "重新稽核" : "稽核";
+      const stage = inp.parentId ? "修補版" : "稽核";
       steps.push({ type: "record", id: n.id, verdict: inp.verdict, stage, current: !!n.current, child: !!n.child,
                    timestamp: n.record.timestamp });
       const gated = Array.isArray(n.deployments) ? n.deployments : null;

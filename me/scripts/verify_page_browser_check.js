@@ -248,7 +248,7 @@ async function main() {
     { name: "proven record: evidence matches, escrow paid, newer record by the same auditor", url: q({ record: r.proven }),
       shot: "record1_desktop.png",
       expect: ["已證實可攻擊（擋部署）", "證據包和鏈上紀錄相符", "已付給稽核者", "示範稽核者", "嚴格", "第 3 階：本地真鏈",
-               "後續：重新稽核", `同一位稽核者之後對同一份原始碼登錄了較新的紀錄 #${r.reaudit}`, "可結算的紀錄",
+               "後續：修補版", `同一位稽核者之後對同一份原始碼登錄了較新的紀錄 #${r.reaudit}`, "可結算的紀錄",
                `cast receipt ${tx.register1.toLowerCase()} --rpc-url ${FX.rpc}`],
       reject: ["和鏈上雜湊不符", "讀取失敗", "manifest.json 的格式不是"],
       selector: { ".timeline .step": 4, [T(tx.register1)]: 1, [T(tx.settle1)]: 1, ...official } },

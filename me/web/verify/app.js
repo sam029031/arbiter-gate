@@ -883,7 +883,7 @@
 
     const content = kv([
       ["判定", h("span", null, `${v.label}（代碼 ${inp.verdict}）`)],
-      ["謂詞等級", h("span", null, pred.label, h("span", { class: "desc" }, pred.desc))],
+      ["證實條件", h("span", null, pred.label, h("span", { class: "desc" }, pred.desc))],
       ["證據等級", h("span", null, tier.label, h("span", { class: "desc" }, tier.desc))],
       ["稽核者", h("span", null, h("span", { class: "inline" }, hexValue(rec.auditor, { kind: "address" }), auditorBadge),
         meAddr ? h("span", { class: "desc mono" }, `ME 格式：${meAddr}`) : null,
@@ -999,7 +999,7 @@
         const main = s.current ? h("span", { class: "main" }, v.short || v.label)
           : h("button", { type: "button", class: "main", onclick: () => openRecord(s.id) }, v.short || v.label);
         ol.append(h("li", { class: `step tone-${ok ? v.tone : "mute"}${s.current ? " current" : ""}`, "aria-current": s.current ? "step" : null },
-          h("span", { class: "st" }, s.child ? "後續：重新稽核" : s.stage), main,
+          h("span", { class: "st" }, s.child ? "後續：修補版" : s.stage), main,
           h("span", { class: "meta" }, `#${s.id} · ${L.formatTime(s.timestamp).slice(0, 10)}${s.current ? " · 這筆" : ""}`)));
       } else if (s.type === "patch") {
         ol.append(h("li", { class: "step patch" }, h("span", { class: "st" }, "修補"),
@@ -1013,8 +1013,8 @@
     }
     if (ghost) {
       ol.append(h("li", { class: "step ghost" }, h("span", { class: "st" }, "下一步"),
-        h("span", { class: "main" }, "修補 → 重新稽核 → 部署"),
-        h("span", { class: "meta" }, "還沒有修補後重新稽核的紀錄")));
+        h("span", { class: "main" }, "修補 → 修補版 → 部署"),
+        h("span", { class: "meta" }, "還沒有修補版的紀錄")));
     }
     return ol;
   }
@@ -1284,10 +1284,10 @@
       h("p", null, `已連線到 ${S.net.name}（chainId ${S.chainId}，目前區塊 #${S.block.toLocaleString("en-US")}），讀取正常；只是還沒有可以查詢的 AuditRegistry。部署之後，這個頁面會直接從鏈上讀出：`),
       h("ul", { class: "checks" },
         check("plan", "每筆稽核紀錄的判定", "四種之一：已證實可攻擊（擋部署）、靜態工具提示但未證實、未發現可證明攻擊（不等於安全）、無法判定（稽核未完成）。沒有「安全」這個選項。"),
-        check("plan", "謂詞等級與證據等級", "攻擊是用嚴格還是寬鬆的條件判定、證據爬到第幾階。"),
+        check("plan", "證實條件與證據等級", "攻擊是用嚴格還是寬鬆的條件證實、證據爬到第幾階。"),
         check("plan", "證據檔的指紋比對", "原始碼、gate.json、攻擊程式、修補的 sha256；頁面會下載證據包逐一重算比對。"),
         check("plan", "部署與程式碼現況", "經由 AuditRegistry 部署的每個合約地址（和稽核者自行宣告的地址分開標示），以及它們現在的程式碼是否和連結時相同。"),
-        check("plan", "來龍去脈", "已證實可攻擊 → 修補 → 重新稽核 → 部署，每一步都是一筆鏈上紀錄。"),
+        check("plan", "來龍去脈", "已證實可攻擊的紀錄 → 修補 → 修補版的紀錄 → 部署，全部從鏈上讀出。"),
         check("plan", "付費託管", "稽核費用由 AuditEscrow 依紀錄結算：完成就付款，沒完成就退回。"),
         check("plan", "區塊瀏覽器連結", "每筆交易附 0x 雜湊；向 ME Hub 查出瀏覽器索引的 Cosmos 交易後附上連結，查不到時給自己驗證的指令。")),
       h("p", { class: "mute small" }, "如果你知道合約地址，可以在下方「網路與合約」填入；或用網址參數 ?registry=0x…&escrow=0x…。"));
