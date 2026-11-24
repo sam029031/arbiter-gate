@@ -936,7 +936,7 @@ def render_job(job: dict[str, Any]) -> bytes:
 <div class="card"><ul class="log" id="log"></ul></div>
 <div class="note" id="notes"></div>
 <details><summary>這一頁在顯示什麼？</summary><p class="note">AI 會反覆「讀程式 → 寫攻擊 → 交給系統在{term('模擬區塊鏈')}上執行」。
-AI 不能自己說有漏洞：只有系統實際執行、而且受害者真的少拿回錢，才算證實。執行都在{term('沙箱')}裡，不能連網、拿不到金鑰。</p>{render_glossary()}</details>
+AI 不能自己說有漏洞：只有系統實際執行、而且量得到後果（例如受害者真的少拿回錢），才算證實。執行都在{term('沙箱')}裡，不能連網、拿不到金鑰。</p>{render_glossary()}</details>
 """
     return page("ARBITER Gate 工作進度", body, job_page_script(job["id"]))
 
@@ -1061,14 +1061,14 @@ def render_index(message: str, featured: list[dict[str, Any]], others: list[dict
   <p class="eyebrow">ARBITER Gate</p>
   <h1><span>部署之前，</span><span>先拿出攻擊證據</span></h1>
 <p class="sub">部署前的證據閘門：AI 寫攻擊、系統在{term('沙箱')}裡的{term('模擬區塊鏈')}上實際執行。
-只有真的成功、而且受害者真的少拿回錢的攻擊，才判定「已證實可攻擊」。</p>
+只有真的成功、而且系統量得到後果的攻擊（例如受害者真的少拿回錢），才判定「已證實可攻擊」。</p>
   <div class="cta"><a class="btn primary" href="#upload">開始稽核</a> {replay} <a class="cta-link" href="/verify/">鏈上驗證頁 →</a></div>
  </div>
  <figure class="hero-media">
   <video autoplay muted loop playsinline preload="metadata" poster="{HERO_LOOP}.png" aria-label="示範流程動畫">
    <source src="{HERO_LOOP}.webm" type="video/webm"><source src="{HERO_LOOP}.mp4" type="video/mp4"></video>
   <img src="{HERO_LOOP}.png" alt="示範流程的靜態畫面" width="1280" height="800" loading="lazy">
-  <figcaption>ME 測試網示範紀錄：稽核 → 鏈上拒絕部署 → 修補後重新稽核 → 經閘門部署</figcaption>
+  <figcaption>ME 測試網示範紀錄：稽核 → 鏈上拒絕部署 → 修補後再攻擊 → 經閘門部署</figcaption>
  </figure>
 </section>
 {stat_row(history, featured, me_docs or [])}
@@ -1651,8 +1651,9 @@ def me_card(me: dict[str, Any] | None) -> str:
     if isinstance(esc_req, dict):
         rows.append((term("託管", "託管") + "的稽核費", _escrow_line(me, esc_req)))
     if me.get("recordedAt"):
-        rows.append(("登記時間", esc(me.get("recordedAt"))
-                     + (f"（紀錄 #{esc(prid)}：{esc(pat.get('recordedAt'))}）" if prec and pat.get("recordedAt") else "")))
+        rows.append(("結果檔寫入時間", esc(me.get("recordedAt"))
+                     + (f"（紀錄 #{esc(prid)}：{esc(pat.get('recordedAt'))}）" if prec and pat.get("recordedAt") else "")
+                     + "；本機記下的時間，不是區塊時間（區塊見上方各筆交易）"))
     dl = "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in rows)
 
     deployed = next((d.get("address") for d in (pdep, dep) if d.get("status") == "deployed"), None)
