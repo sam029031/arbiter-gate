@@ -63,9 +63,9 @@ ME 測試網連線資訊：EVM JSON-RPC `https://beta-hub-8545.explorer-testnet.
 - `arbiter_me/`：從 gate.json 產生紀錄與可重現的證據資料夾、登記、經由閘門部署、驗證（`--evidence`、`--rebuild`、`--replay`）、託管、0x ↔ me1 位址換算、ME 區塊瀏覽器的 Cosmos 雜湊換算；只用 Python 標準函式庫＋Foundry。
 - `web/verify/`：靜態驗證頁（桌機與手機），讀 ME 測試網或本機 anvil。
 - 網頁結果頁新增「鏈上紀錄」卡片（判定 → 鏈上拒絕部署 → 修補 → 部署的時間軸）；本機網頁可直接開 `/verify`。
-- `scripts/me_live_demo.sh`：一行指令在 ME 測試網完成整個示範，並寫出 `EVIDENCE.md`；`scripts/me_registry_probe.py`：在本機鏈上把同樣流程跑一遍的端到端檢查（89 項，含實鏈示範與兩個錢包示範的排練）。
+- `scripts/me_live_demo.sh`：一行指令在 ME 測試網完成 11/23 的示範（T1～T11），並寫出 `EVIDENCE.md`；`scripts/me_registry_probe.py`：在本機鏈上把同樣流程跑一遍的端到端檢查（89 項，含實鏈示範與兩個錢包示範的排練）。
 - 我們用 ARBITER Gate 稽核了自己的兩個合約（見 `EVIDENCE.md`）。
-- `me.py two-party`：兩個錢包的託管示範，第二個錢包當委託人，也由它部署合約：委託 → 稽核者用紀錄結算 → 委託人經閘門部署 → 沒人結算的委託逾期退款。`me.py deploy --record N` 讓任何帳戶部署已登錄的紀錄。
+- `me.py two-party`：兩個錢包的託管示範，第二個錢包當委託人，也由它部署合約：委託 → 稽核者稽核並登錄紀錄 → 稽核者用這筆紀錄結算 → 委託人經閘門部署 → 沒人結算的委託逾期退款。`me.py deploy --record N` 讓稽核者以外的帳戶也能依紀錄 N 經閘門部署（判定 3、0 一樣被拒，地址綁定呼叫者）。
 
 ### 4.2 改進：修正 InnoServe 決賽時沒做好的地方
 
@@ -78,7 +78,7 @@ ME 測試網連線資訊：EVM JSON-RPC `https://beta-hub-8545.explorer-testnet.
 | 嚴格條件只看一個一般使用者、只算 ETH：協議公庫被盜、ERC20 被盜都證實不了 | 加入「協議公庫當受害者」與 ERC20 版的受害者損失，仍要求守恆；捐款、搶先、擁有者正常提領等誤判情境都有反例 | `treasury_probe` 29/29 |
 | 沙箱只有 solc 0.8.20／0.8.37，固定版本（如 `pragma solidity 0.8.24;`）的合約都變「無法判定」 | 新沙箱映像檔內含 0.6.12、0.7.6、0.8.0～0.8.37（逐一核對官方雜湊）；缺版本時用中文說明原因 | `sandbox_solc_probe` 7/7 |
 | 結果頁：重現失敗顯示成「沒有受損」；沒有修補也寫「參考下方的修補」；「受害者受損」只看 B < A；英文內部訊息露出；回放結果頁沒有錄製日期 | 依實際狀態顯示「沒有量到」「重現失敗」與原因；建議文字依有沒有通過驗證的修補而定；標籤反映守恆規則；內部訊息翻成中文或收進技術細節 | `webui_probe` 25/25 |
-| **這次審查發現**：驗證頁把網址參數指定的節點（`?rpc=`）或合約（`?registry=`、`?escrow=`）當成官方部署顯示，連「✓」稽核者都照給；結果頁把 AI 寫的代幣運算式當成金額單位、沒有跳脫就印出（可以插入程式碼） | 官方部署＝頁面內建（或部署紀錄檔列出）的節點＋部署紀錄檔裡的 AuditRegistry＋鏈上程式碼雜湊相符；其他來源在頁首和每個畫面標「非官方來源」、不給「✓」，程式碼不是 AuditRegistry 的合約完全不讀；單位只顯示代幣符號或地址，一律跳脫 | 驗證頁 node 測試 48/48、瀏覽器檢查 35/35；`webui_probe` 25/25 |
+| **這次審查發現**：驗證頁把網址參數指定的節點（`?rpc=`）或合約（`?registry=`、`?escrow=`）當成官方部署顯示，連「✓」稽核者都照給；結果頁把 AI 寫的代幣運算式當成金額單位、沒有跳脫就印出（可以插入程式碼） | 官方部署＝頁面內建（或部署紀錄檔列出）的節點＋部署紀錄檔裡的 AuditRegistry＋鏈上程式碼雜湊相符；其他來源在頁首和每個畫面標「非官方來源」、不給「✓」，程式碼不是 AuditRegistry 的合約完全不讀；單位只顯示代幣符號或地址，一律跳脫 | 驗證頁 node 測試 48/48、瀏覽器檢查 37/37；`webui_probe` 25/25 |
 
 既有的合併檢查（8 個完整性 probe、patch、regression、mcp、repo_patch、reattack、project_upload、liveness_patch、live_drain、playback_date、diffscan、pr_gate、action_fork）全部照舊通過。改動的核心檔案（agent.py、tools.py、workspace.py、run.py、patch.py、gate.py）與原因，逐項寫在 commit 訊息裡；`innoserve/README.md` 裡「判定核心沒改」的雜湊表只適用於決賽版。
 
@@ -112,7 +112,9 @@ python3 me/me.py verify <合約位址或紀錄編號> --network me-testnet --rep
 cd arbiter && python3 -m arbiter.web --port 8765       # 網頁介面；開 http://127.0.0.1:8765/verify
 ```
 
-**自己上鏈**（需要 ME 測試網 MEC，水龍頭每天 2 MEC）：`bash me/scripts/new_wallet.sh` 建錢包 → 水龍頭領 MEC → `bash me/scripts/me_live_demo.sh`。整個示範只需不到 0.0011 MEC。
+ME 測試網的 RPC 預設是 `https://beta-hub-8545.explorer-testnet.me`。這個網域連不上時（11/25 中午曾暫時回 404，節點本身正常），在指令前加 `ME_RPC_URL=http://118.175.0.249:8545`，這是 ME 官方 Python SDK 設定的同一個節點；驗證頁在 HTTPS 上，只能用 HTTPS 網域。
+
+**自己上鏈**（需要 ME 測試網 MEC，水龍頭每天 2 MEC）：`bash me/scripts/new_wallet.sh` 建錢包 → 水龍頭領 MEC → `bash me/scripts/me_live_demo.sh`，這是 11/23 的示範，只需不到 0.0011 MEC。
 
 **兩個錢包的託管示範**：再建一個錢包當委託人（`bash me/scripts/new_wallet.sh me-requester`），依序 `python3 me/me.py two-party request --account me-requester --source me/examples/PrimeYieldVault.sol` → 用 ARBITER Gate 稽核這份原始碼 → `two-party settle --account <稽核者> --gate <gate.json>` → `two-party deploy --account me-requester` → 開單 2 小時後 `two-party refund`；`two-party status` 會列出進度和下一步。
 

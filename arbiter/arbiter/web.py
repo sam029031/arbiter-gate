@@ -596,7 +596,7 @@ class Handler(BaseHTTPRequestHandler):
         others = [r for r in runs if r["run_id"] not in FEATURED_RUNS]
         # the home page's stat row counts ME testnet records and transactions from these files
         me_docs = []
-        for name in ("me-testnet.demo.json", "me-testnet.json"):
+        for name in ("me-testnet.demo.json", "me-testnet.json", "me-testnet.two-party.json"):
             try:
                 me_docs.append(json.loads((DEPLOYMENTS_DIR / name).read_text(encoding="utf-8")))
             except (OSError, ValueError):
